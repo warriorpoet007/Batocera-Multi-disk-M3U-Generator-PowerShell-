@@ -26,7 +26,7 @@ NOTES
 - The designator must be the last character string in the filename before the period and file extension
     With an exemption for a ")" between them
 -False detections may be possible, although should be very rare
-    You may need to delete .m3u files you know you don't need if the output indicates any
+    You may need to delete .m3u files you know you don't need if the output indicates any were created
 #>
 
 # Retrieve the directory where the script resides
@@ -122,4 +122,5 @@ foreach ($group in $groups) {
 
     Write-Host "Created playlist: $playlistPath"
 }
+
 
