@@ -32,7 +32,7 @@ NOTES
 # Retrieve the directory where the script resides (this will be the root starting location for the search)
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# Folder names to skip entirely (case-insensitive, exact match)
+# Folder names to skip (case-insensitive, exact match)
 $skipFolders = @(
     'images',
     'videos',
@@ -122,6 +122,7 @@ foreach ($group in $groups) {
 
     Write-Host "Created playlist: $playlistPath"
 }
+
 
 
 
