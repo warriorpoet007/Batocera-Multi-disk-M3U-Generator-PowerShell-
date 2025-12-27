@@ -22,6 +22,7 @@ FUNCTIONAL BREAKDOWN
 
 NOTES
 - Place this file into the ROM folder to process all systems, or in a system subfolder to process just that one
+- Be aware that this script is designed to completely replace any existing M3U files of the same name
 - Filenames for a given game must be identical, with the only differentiator being the designator
     If not, separate M3U files will be created for each differentiating disk name
 - The designator must be the last character string in the filename before the period and file extension
@@ -123,6 +124,7 @@ foreach ($group in $groups) {
 
     Write-Host "Created playlist: $playlistPath"
 }
+
 
 
 
