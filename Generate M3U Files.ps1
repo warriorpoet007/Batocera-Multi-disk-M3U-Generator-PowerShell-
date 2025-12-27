@@ -10,7 +10,7 @@ FUNCTIONAL BREAKDOWN
     Scans up to 2 subdirectory levels deep recursively
 - Filters the file list by those with "disk" or "disc" in the filename
 - Filters the list by those with a number or letter designator after "disk" or "disc" at end of filename
-    i.e., ignore all other instances of "disk" or "disc" character strings in filenames
+    i.e., ignores all other instances of "disk" or "disc" character strings in filenames
 - Creates an .m3u file from the base name (i.e., before the disk/disc designator and filename extension)
     Places the .m3u file into the same folder as the game files themselves
     Replaces any existing .m3u files with the same name
@@ -84,4 +84,5 @@ foreach ($group in $groups) {
     Set-Content -Path $playlistPath -Value $fileList -Encoding UTF8
 
     Write-Host "Created playlist: $playlistPath"
+
 }
