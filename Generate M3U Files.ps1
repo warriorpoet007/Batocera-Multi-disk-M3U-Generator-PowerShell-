@@ -5,10 +5,9 @@ AUTHOR: Devin Kelley, Distant Thunderworks LLC
 
 NOTES:
 - Place this file into the ROMS folder to process all platforms, or in a platform's individual subfolder to process just that one.
-- False detections and misses are possible, especially for complex naming strutures, but should be rare.
-    - I've built intelligence into the script that attempts to determine and provide annotations for a variety of scenarios as to why:
-        - The creation of a playlist might have been supressed
-        - A multi-disk file wasn't incorporated into a playlist
+- I've built intelligence into the script that attempts to determine and provide annotations for a variety of scenarios as to why:
+    - The creation of a playlist might have been supressed
+    - A multi-disk file wasn't incorporated into a playlist
 
 BREAKDOWN
 PURPOSE: Create .m3u files for each multi-disk game and insert the list of game filenames into the playlist
