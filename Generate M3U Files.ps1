@@ -5,6 +5,18 @@ AUTHOR: Devin Kelley, Distant Thunderworks LLC
 
 NOTES:
 - Place this file into the ROMS folder to process all platforms, or in a platform's individual subfolder to process just that one.
+- False detections and misses are possible, especially for complex naming strutures, but should be rare.
+    - I've built intelligence into the script that attempts to determine and provide annotations for a variety of scenarios as to why:
+        - The creation of a playlist might have been supressed
+        - A multi-disk file wasn't incorporated into a playlist
+
+BREAKDOWN
+PURPOSE: Create .m3u files for each multi-disk game and insert the list of game filenames into the playlist
+VERSION: 1.2
+AUTHOR: Devin Kelley, Distant Thunderworks LLC
+
+NOTES:
+- Place this file into the ROMS folder to process all platforms, or in a platform's individual subfolder to process just that one.
 - False detections and misses are possible, especially for complex naming structures, but should be rare.
     - I've built intelligence into the script that attempts to determine and provide annotations for a variety of scenarios as to why:
         - The creation of a playlist might have been suppressed
@@ -49,10 +61,10 @@ BREAKDOWN
      - Cleans up the final playlist name (removes double spaces, dangling punctuation/parens, etc.)
 - Prevents collisions and duplicates
      - Same-run path collisions:
-If the intended playlist path is already “claimed” in the current run (written or suppressed), it generates alternate names:
+     - If the intended playlist path is already “claimed” in the current run (written or suppressed), it generates alternate names:
           - [alt], [alt2], etc.
      - Same-run duplicate playlist content suppression:
-If an identical ordered list of disk files would be emitted again during the same run, it suppresses the duplicate and reports what it duplicated.
+     - If an identical ordered list of disk files would be emitted again during the same run, it suppresses the duplicate and reports what it duplicated.
 - Writes .m3u playlists with strict cleanliness rules
      - Writes the filenames only (not full paths), in disk/side order
      - Ensures playlists written by the script have:
@@ -901,4 +913,3 @@ if ($totalSeconds -lt 60) {
 Write-Host ""
 Write-Host "Runtime:" -ForegroundColor White -NoNewline
 Write-Host " $runtimeText"
-
