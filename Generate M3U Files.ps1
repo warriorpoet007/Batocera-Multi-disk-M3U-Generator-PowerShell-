@@ -50,7 +50,7 @@ BREAKDOWN
 - Prevents collisions and duplicates
      - Same-run path collisions:
           - If the intended playlist path is already “claimed” in the current run (written or suppressed), it generates alternate names:
-          - [alt], [alt2], etc.
+               - [alt], [alt2], etc.
      - Same-run duplicate playlist content suppression:
           - If an identical ordered list of disk files would be emitted again during the same run, it suppresses the duplicate and reports what it duplicated.
 - Writes .m3u playlists with strict cleanliness rules
@@ -901,4 +901,5 @@ if ($totalSeconds -lt 60) {
 Write-Host ""
 Write-Host "Runtime:" -ForegroundColor White -NoNewline
 Write-Host " $runtimeText"
+
 
