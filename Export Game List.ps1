@@ -39,7 +39,10 @@ BREAKDOWN
 - Generates additional derived columns:
     - Title (Title Case derived from the name; uses safe fallbacks when name is missing)
     - EntryType (Single, Multi-M3U, Multi-XML)
-    - DiskCount (total entries in the group: visible + hidden)
+    - DiskCount:
+        - Multi-M3U: counts non-empty, non-comment lines in the .m3u file
+        - Multi-XML: total entries in the group (visible + hidden)
+        - Single: 1
     - XMLState (Normal or Malformed)
 - Deletes any existing "Game List.csv" in the output folder and writes a newly generated "Game List.csv"
 #>
@@ -471,6 +474,35 @@ function Get-XmlNodeText {
   return $text.Trim()
 }
 
+# --- FUNCTION: Get-M3UDiskCount ---
+# PURPOSE:
+# - Count the number of disk entries inside an .m3u playlist file.
+# NOTES:
+# - Counts non-empty lines that do not start with '#'
+# - Returns 1 if the file cannot be read or contains no usable entries
+function Get-M3UDiskCount {
+  param([Parameter(Mandatory=$true)][string]$M3UPath)
+
+  if ([string]::IsNullOrWhiteSpace($M3UPath)) { return 1 }
+  if (-not (Test-Path -LiteralPath $M3UPath)) { return 1 }
+
+  $lines = @()
+  try {
+    $lines = @(Get-Content -LiteralPath $M3UPath -ErrorAction Stop)
+  } catch {
+    return 1
+  }
+
+  $usable = @(
+    $lines |
+      ForEach-Object { if ($null -eq $_) { '' } else { ([string]$_).Trim() } } |
+      Where-Object { $_ -ne '' -and (-not $_.StartsWith('#')) }
+  )
+
+  if (@($usable).Count -lt 1) { return 1 }
+  return [int]@($usable).Count
+}
+
 # --- FUNCTION: Read-Gamelist ---
 # PURPOSE:
 # - Read a gamelist.xml and return a flat list of entry objects with Name/Path/Hidden fields.
@@ -636,7 +668,9 @@ foreach ($t in $targets) {
 
   if ($isRomsRootMode) {
     Write-Host ""
-    Write-Host "PLATFORM: $($t.PlatformFolder)" -ForegroundColor Green
+    $pf = [string]$t.PlatformFolder
+    $pn = Get-FriendlyPlatformName $pf
+    Write-Host ("{0} - {1}" -f $pf, $pn) -ForegroundColor Green
   }
 
   $platformFolder = [string]$t.PlatformFolder
@@ -673,18 +707,45 @@ foreach ($t in $targets) {
       elseif ($hiddenItems.Count -gt 0) {
         $entryType = 'Multi-XML'
       }
-      elseif ($items.Count -gt 1) {
-        $entryType = 'Multi-XML'
-      }
 
       $title = Get-TitleForOutput -ResolvedName $nameStr
+
+      # DiskCount handling is based on the inferred entry type:
+      # - Multi-M3U: read the .m3u file and count usable entries
+      # - Multi-XML: count group entries (visible + hidden)
+      # - Single: 1
+      $diskCount = 1
+
+      if ($entryType -eq 'Multi-M3U') {
+
+        $platformRoot = $startDir
+        if ($isRomsRootMode) {
+          $platformRoot = Join-Path $startDir $platformFolder
+        }
+
+        $m3uFullPath = $pathStr
+        if (-not [System.IO.Path]::IsPathRooted($m3uFullPath)) {
+          $rel = $m3uFullPath.Trim()
+          if ($rel.StartsWith('./')) { $rel = $rel.Substring(2) }
+          elseif ($rel.StartsWith('.\')) { $rel = $rel.Substring(2) }
+          $m3uFullPath = Join-Path $platformRoot $rel
+        }
+
+        $diskCount = Get-M3UDiskCount -M3UPath $m3uFullPath
+      }
+      elseif ($entryType -eq 'Multi-XML') {
+        $diskCount = [int]$items.Count
+      }
+      else {
+        $diskCount = 1
+      }
 
       # Build output row in the exact column order expected for the CSV export
       $rows += [pscustomobject]@{
         Title          = $title
         PlatformName   = [string]$platformName
         EntryType      = [string]$entryType
-        DiskCount      = [int]$items.Count
+        DiskCount      = [int]$diskCount
         PlatformFolder = $platformFolder
         FilePath       = $pathStr
         XMLState       = [string]$g.XMLState
