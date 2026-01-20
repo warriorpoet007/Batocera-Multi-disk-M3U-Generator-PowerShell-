@@ -257,7 +257,7 @@ $PlatformMap = @{
   'psx'            = @{ Platform = 'PlayStation'; Note = 'Sony' }
   'pv1000'         = @{ Platform = 'Casio PV-1000'; Note = 'Casio' }
   'pygame'         = @{ Platform = 'Python Games'; Note = 'Port' }
-  'pyxel'          = @{ Platform = 'Pyxel fantasy console'; Note = 'Takashi Kitao' }
+  'pyxel'          = @{ Platform = 'Pyxel Fantasy Console'; Note = 'Takashi Kitao' }
   'quake3'         = @{ Platform = 'Quake 3'; Note = 'Port' }
   'raze'           = @{ Platform = 'Raze'; Note = 'Port' }
   'reminiscence'   = @{ Platform = 'Reminiscence (Flashback Emulator)'; Note = 'Port' }
@@ -311,9 +311,9 @@ $PlatformMap = @{
   'vitaquake2'     = @{ Platform = 'PlayStation Vita port of Quake II'; Note = 'Port' }
   'virtualboy'     = @{ Platform = 'Virtual Boy'; Note = 'Nintendo' }
   'vpinball'       = @{ Platform = 'Visual Pinball'; Note = 'Port' }
-  'voxatron'       = @{ Platform = 'Voxatron fantasy console'; Note = 'Lexaloffle Games' }
+  'voxatron'       = @{ Platform = 'Voxatron Fantasy Console'; Note = 'Lexaloffle Games' }
   'vsmile'         = @{ Platform = 'V.Smile (TV LEARNING SYSTEM)'; Note = 'VTech' }
-  'wasm4'          = @{ Platform = 'WASM4 fantasy console'; Note = 'Aduros' }
+  'wasm4'          = @{ Platform = 'WASM4 Fantasy Console'; Note = 'Aduros' }
   'wii'            = @{ Platform = 'Wii'; Note = 'Nintendo' }
   'wiiu'           = @{ Platform = 'Wii U'; Note = 'Nintendo' }
   'windows'        = @{ Platform = 'WINE'; Note = 'Bob Amstadt/Alexandre Julliard' }
