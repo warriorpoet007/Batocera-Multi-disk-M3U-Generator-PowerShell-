@@ -11,8 +11,9 @@ NOTES:
 - Multi-disk detection is inferred as:
     - Multi-M3U: the visible entry’s <path> ends in .m3u
     - Multi-XML: the visible entry has 1+ additional entries with the same group key where <hidden>true</hidden> is set
+        - This is tailored to be run after first running the Generate Batocera Playlists.ps1 script
     - Single: neither of the above
-- IMPORTANT (robustness):
+- Robustness:
     - Some gamelist.xml files in the wild can be malformed (mismatched tags, partial writes, etc.).
     - This script will attempt a normal XML parse first, and if that fails it will fall back to a "salvage mode"
       that extracts <game>...</game> blocks and parses them individually.
@@ -38,6 +39,8 @@ BREAKDOWN
 - Groups entries by the group key to infer multi-disk sets and produce a single row per visible entry
 - Generates additional derived columns:
     - Title (Title Case derived from the name; uses safe fallbacks when name is missing)
+    - PlatformName (friendly platform name derived from the platform folder)
+    - Note (supplemental platform note derived from the platform mapping)
     - EntryType (Single, Multi-M3U, Multi-XML)
     - DiskCount:
         - Multi-M3U: counts non-empty, non-comment lines in the .m3u file
@@ -96,230 +99,271 @@ Write-Phase "Starting export..."
 # USER CONFIGURATION: PLATFORM NAME TRANSLATIONS
 # ==================================================================================================
 
-# Folder -> Friendly Platform Name mapping (extend as needed)
-$PlatformNameMap = @{
-  '3do'          = '3DO (Panasonic)'
-  'abuse'        = 'Abuse SDL (Port)'
-  'atom'         = 'Atom (Acorn Computers)'
-  'electron'     = 'Electron (Acorn Computers)'
-  'advision'     = 'Adventure Vision (Entex)'
-  'amiga1200'    = 'Amiga 1200/AGA (Commodore)'
-  'amiga500'     = 'Amiga 500/OCS/ECS (Commodore)'
-  'amigacd32'    = 'Amiga CD32 (Commodore)'
-  'amstradcpc'   = 'Amstrad CPC (Amstrad)'
-  'gx4000'       = 'Amstrad GX4000 (Amstrad)'
-  'apfm1000'     = 'APF-MP1000/MP-1000/M-1000 (APF Electronics Inc.)'
-  'apple2'       = 'Apple II (Apple)'
-  'apple2gs'     = 'Apple IIGS (Apple)'
-  'arcadia'      = 'Arcadia 2001/et al. (Emerson Radio)'
-  'archimedes'   = 'Archimedes (Acorn Computers)'
-  'arduboy'      = 'Arduboy (Arduboy)'
-  'atari2600'    = 'Atari 2600/VCS (Atari)'
-  'atari5200'    = 'Atari 5200 (Atari)'
-  'atari7800'    = 'Atari 7800 (Atari)'
-  'atari800'     = 'Atari 800 (Atari)'
-  'jaguar'       = 'Atari Jaguar (Atari)'
-  'jaguarcd'     = 'Atari Jaguar CD (Atari)'
-  'lynx'         = 'Atari Lynx (Atari)'
-  'atarist'      = 'Atari ST (Atari)'
-  'xegs'         = 'Atari XEGS (Atari)'
-  'astrocde'     = 'Astrocade (Bally/Midway)'
-  'bbc'          = 'BBC Micro/Master/Archimedes (Acorn Computers)'
-  'bennugd'      = 'BennuGD (Game Development Suite)'
-  'camplynx'     = 'Camputers Lynx (Camputers)'
-  'cannonball'   = 'Cannonball (Port)'
-  'casloopy'     = 'Casio Loopy (Casio)'
-  'pv1000'       = 'Casio PV-1000 (Casio)'
-  'catacombgl'   = 'Catacomb GL (Port)'
-  'cavestory'    = 'Cave Story (Port)'
-  'cdogs'        = 'C-Dogs (Port)'
-  'adam'         = 'Coleco Adam (Coleco)'
-  'colecovision' = 'ColecoVision (Coleco)'
-  'commanderx16' = 'Commander X16 (David Murray)'
-  'c128'         = 'Commodore 128 (Commodore)'
-  'c64'          = 'Commodore 64 (Commodore)'
-  'amigacdtv'    = 'Commodore CDTV (Commodore)'
-  'pet'          = 'Commodore PET (Commodore)'
-  'cplus4'       = 'Commodore Plus/4 (Commodore)'
-  'c20'          = 'Commodore VIC-20/VC-20 (Commodore)'
-  'cdi'          = 'Compact Disc Interactive/CD-i (Philips, et al.)'
-  'crvision'     = 'CreatiVision/Educat 2002/Dick Smith Wizzard/FunVision (VTech)'
-  'daphne'       = 'DAPHNE Laserdisc (Various)'
-  'devilutionx'  = 'DevilutionX - Diablo/Hellfire (Port)'
-  'dice'         = 'Discrete Integrated Circuit Emulator (Various)'
-  'dolphin'      = 'Dolphin (GameCube/Wii Emulator)'
-  'dos'          = 'DOSbox (Peter Veenstra/Sjoerd van der Berg)'
-  'dxx-rebirth'  = 'DXX Rebirth - Descent/Descent 2 (Port)'
-  'easyrpg'      = 'EasyRPG - RPG Maker (Port)'
-  'ecwolf'       = 'Wolfenstein 3D (Port)'
-  'eduke32'      = 'Duke Nukem 3D (Port)'
-  'enterprise'   = 'Enterprise (Enterprise Computers)'
-  'channelf'     = 'Fairchild Channel F (Fairchild)'
-  'fallout1-ce'  = 'Fallout CE (Port)'
-  'fallout2-ce'  = 'Fallout2 CE (Port)'
-  'fds'          = 'Family Computer Disk System/Famicom (Nintendo)'
-  'fbneo'        = 'FinalBurn Neo (Various)'
-  'flash'        = 'Flashpoint - Adobe Flash (Bluemaxima)'
-  'flatpak'      = 'Flatpak (Linux)'
-  'fmtowns'      = 'FM Towns/Towns Marty (Fujitsu)'
-  'fm7'          = 'Fujitsu Micro 7 (Fujitsu)'
-  'fpinball'     = 'Future Pinball (Port)'
-  'gamate'       = 'Gamate/Super Boy/Super Child Prodigy (Bit Corporation)'
-  'gameandwatch' = 'Game & Watch (Nintendo)'
-  'gb'           = 'Game Boy (Nintendo)'
-  'gb2players'   = 'Game Boy 2 Players (Nintendo)'
-  'gba'          = 'Game Boy Advance (Nintendo)'
-  'gbc'          = 'Game Boy Color (Nintendo)'
-  'gbc2players'  = 'Game Boy Color 2 Players (Nintendo)'
-  'gamegear'     = 'Game Gear (Sega)'
-  'gmaster'      = 'Game Master/Systema 2000/Super Game/Game Tronic (Hartung, et al.)'
-  'gamepock'     = 'Game Pocket Computer (Epoch)'
-  'gamecom'      = 'Game.com (Tiger Electronics)'
-  'gp32'         = 'GP32 (Game Park)'
-  'gzdoom'       = 'GZDoom - Boom/Chex Quest/Heretic/Hexen/Strife (Port)'
-  'lcdgames'     = 'Handheld LCD Games (Various)'
-  'hurrican'     = 'Hurrican (Port)'
-  'hcl'          = 'Hydra Castle Labyrinth (Port)'
-  'ikemen'       = 'Ikemen Go (Port)'
-  'intellivision'= 'Intellivision (Mattel)'
-  'fury'         = 'Ion Fury (Port)'
-  'sgb-msu1'     = 'LADX-MSU1 (Nintendo)'
-  'laser310'     = 'Laser 310 (Video Technology (VTech))'
-  'lowresnx'     = 'Lowres NX (Timo Kloss)'
-  'lutro'        = 'Lutro (Port)'
-  'mugen'        = 'M.U.G.E.N (Port)'
-  'macintosh'    = 'Macintosh 128K (Apple)'
-  'odyssey2'     = 'Odyssey 2/Videopac G7000 (Magnavox/Philips)'
-  'vgmplay'      = 'MAME Video Game Music Player (Various)'
-  'megaduck'     = 'Mega Duck/Cougar Boy (Welback Holdings)'
-  'msxturbor'    = 'Microsoft MSX turboR (Microsoft)'
-  'msx1'         = 'Microsoft MSX1 (Microsoft)'
-  'msx2'         = 'Microsoft MSX2 (Microsoft)'
-  'msx2+'        = 'Microsoft MSX2plus (Microsoft)'
-  'xbox'         = 'Microsoft Xbox (Microsoft)'
-  'xbox360'      = 'Microsoft Xbox 360 (Microsoft)'
-  'moonlight'    = 'Moonlight (Port)'
-  'mrboom'       = 'Mr. Boom (Port)'
-  'msu-md'       = 'MSU-MD (Sega)'
-  'mame'         = 'Multiple Arcade Machine Emulator (Various)'
-  'namco2x6'     = 'Namco System 246 (Sony / Namco)'
-  'ports'        = 'Native ports (Linux)'
-  'pc60'         = 'NEC PC-6000 (NEC)'
-  'pc88'         = 'NEC PC-8800 (NEC)'
-  'pc98'         = 'NEC PC-9800/PC-98 (NEC)'
-  'pcfx'         = 'NEC PC-FX (NEC)'
-  'neogeo'       = 'Neo Geo (SNK)'
-  'neogeocd'     = 'Neo Geo CD (SNK)'
-  'ngp'          = 'Neo Geo Pocket (SNK)'
-  'ngpc'         = 'Neo Geo Pocket Color (SNK)'
-  '3ds'          = 'Nintendo 3DS (Nintendo)'
-  'n64'          = 'Nintendo 64 (Nintendo)'
-  'n64dd'        = 'Nintendo 64DD (Nintendo)'
-  'nds'          = 'Nintendo DS (Nintendo)'
-  'nes'          = 'Nintendo Entertainment System/Famicom (Nintendo)'
-  'gamecube'     = 'Nintendo GameCube (Nintendo)'
-  'wii'          = 'Nintendo Wii (Nintendo)'
-  'wiiu'         = 'Nintendo Wii U (Nintendo)'
-  'openbor'      = 'Open Beats of Rage (Port)'
-  'openjazz'     = 'Openjazz (Port)'
-  'oricatmos'    = 'Oric Atmos (Tangerine Computer Systems)'
-  'multivision'  = 'Othello_Multivision (Tsukuda Original)'
-  'pcenginecd'   = 'PC Engine CD-ROM2/Duo R/Duo RX/TurboGrafx CD/TurboDuo (NEC)'
-  'supergrafx'   = 'PC Engine/SuperGrafx/PC Engine 2 (NEC)'
-  'pcengine'     = 'PC Engine/TurboGrafx-16 (NEC)'
-  'pdp1'         = 'PDP-1 (Digital Equipment Corporation)'
-  'videopacplus' = 'Philips Videopac+ G7400/G7420 (Philips)'
-  'pico8'        = 'PICO-8 fantasy console (Lexaloffle Games)'
-  'psp'          = 'PlayStation Portable (Sony)'
-  'psvita'       = 'PlayStation Vita (Sony)'
-  'plugnplay'    = 'Plug ''n'' Play/Handheld TV Games (Various)'
-  'pokemini'     = 'Pokemon Mini (Nintendo)'
-  'prboom'       = 'Proff Boom (Port)'
-  'pygame'       = 'Python Games (Port)'
-  'pyxel'        = 'Pyxel fantasy console (Takashi Kitao)'
-  'raze'         = 'Raze (Port)'
-  'reminiscence' = 'Reminiscence (Flashback Emulator) (Port)'
-  'retroarch'    = 'RetroArch - Liberato Cores (Hans-Kristian "Themaister" Arntzen)'
-  'xrick'        = 'Rick Dangerous (Port)'
-  'samcoupe'     = 'SAM Coupe (Miles Gordon Technology)'
-  'atomiswave'   = 'Sammy Atomiswave (Sammy)'
-  'satellaview'  = 'Satellaview (Nintendo)'
-  'scummvm'      = 'ScummVM (Ludvig Strigeus/Vincent Hamm)'
-  'sdlpop'       = 'SDLPoP - Prince of Persia (Port)'
-  'sega32x'      = 'Sega 32X (Sega)'
-  'segacd'       = 'Sega CD/Mega CD (Sega)'
-  'dreamcast'    = 'Sega Dreamcast (Sega)'
-  'megadrive'    = 'Sega Genesis/Mega Drive (Sega)'
-  'lindbergh'    = 'Sega Lindbergh (Sega)'
-  'mastersystem' = 'Sega Master System/Mark III (Sega)'
-  'mame/model1'  = 'Sega Model 1 (Sega)'
-  'model2'       = 'Sega Model 2 (Sega)'
-  'model3'       = 'Sega Model 3 (Sega)'
-  'naomi'        = 'Sega NAOMI (Sega)'
-  'naomi2'       = 'Sega NAOMI 2 (Sega)'
-  'pico'         = 'Sega Pico (Sega)'
-  'saturn'       = 'Sega Saturn (Sega)'
-  'sg1000'       = 'Sega SG-1000/SG-1000 II/SC-3000 (Sega)'
-  'x1'           = 'Sharp X1 (Sharp)'
-  'x68000'       = 'Sharp X68000 (Sharp)'
-  'zx81'         = 'Sinclair ZX81 (Sinclair)'
-  'singe'        = 'SINGE (Various)'
-  'socrates'     = 'Socrates (VTech)'
-  'solarus'      = 'Solarus (Port)'
-  'psx'          = 'Sony PlayStation (Sony)'
-  'ps2'          = 'Sony PlayStation 2 (Sony)'
-  'ps3'          = 'Sony PlayStation 3 (Sony)'
-  'ps4'          = 'Sony PlayStation 4 (Sony)'
-  'spectravideo' = 'Spectravideo (Spectravideo)'
-  'sonicretro'   = 'Star Engine/Sonic Retro Engine (Port)'
-  'steam'        = 'Steam (Valve)'
-  'sufami'       = 'SuFami Turbo (Bandai)'
-  'supracan'     = 'Super A''Can (Funtech Entertainment)'
-  'scv'          = 'Super Cassette Vision (Epoch Co.)'
-  'sgb'          = 'Super Game Boy (Nintendo)'
-  'superbroswar' = 'Super Mario War (Port)'
-  'snes-msu1'    = 'Super NES CD-ROM/SNES MSU-1 (Nintendo)'
-  'snes'         = 'Super Nintendo Entertainment System (Nintendo)'
-  'vis'          = 'Tandy Video Information System (Tandy / Memorex)'
-  'thomson'      = 'Thomson MO/TO Series Computer (Thomson)'
-  'ti99'         = 'TI-99/4/4A (Texas Instruments)'
-  'tic80'        = 'TIC-80 fantasy console (Vadim Grigoruk)'
-  'tutor'        = 'Tomy Tutor/Pyuta/Grandstand Tutor (Tomy)'
-  'traider1'     = 'TR1X - Tomb Raider 1 (Port)'
-  'traider2'     = 'TR2X - Tomb Rauder 2 (Port)'
-  'triforce'     = 'Triforce (Namco/Sega/Nintendo)'
-  'coco'         = 'TRS-80/Tandy Color Computer (Tandy/RadioShack)'
-  'tyrquake'     = 'TyrQuake - Quake 1 (Port)'
-  'uzebox'       = 'Uzebox Open-Source Console (Alec Bourque)'
-  'vsmile'       = 'V.Smile (TV LEARNING SYSTEM) (VTech)'
-  'vectrex'      = 'Vectrex (Milton Bradley)'
-  'vc4000'       = 'Video Computer 4000 (Interton)'
-  'vircon32'     = 'Vircon32 virtual console (Carra)'
-  'virtualboy'   = 'Virtual Boy (Nintendo)'
-  'vpinball'     = 'Visual Pinball (Port)'
-  'voxatron'     = 'Voxatron fantasy console (Lexaloffle Games)'
-  'wasm4'        = 'WASM4 fantasy console (Aduros)'
-  'supervision'  = 'Watara Supervision (Watara)'
-  'windows'      = 'WINE (Bob Amstadt/Alexandre Julliard)'
-  'wswan'        = 'WonderSwan (Bandai)'
-  'wswanc'       = 'WonderSwan Color (Bandai)'
-  'xash3d_fwgs'  = 'Xash3D FWGS - Valve Games (Port)'
-  'zxspectrum'   = 'ZX Spectrum (Sinclair)'
+# Folder -> Platform + Note mapping (extend as needed)
+# - Platform: friendly platform name (no parentheses)
+# - Note: supplemental note (manufacturer, port, etc.) without parentheses; may be ""
+$PlatformMap = @{
+  '3do'            = @{ Platform = '3DO'; Note = 'Panasonic' }
+  '3ds'            = @{ Platform = 'Nintendo 3DS'; Note = 'Nintendo' }
+  'abuse'          = @{ Platform = 'Abuse SDL'; Note = 'Port' }
+  'adam'           = @{ Platform = 'Coleco Adam'; Note = 'Coleco' }
+  'advision'       = @{ Platform = 'Adventure Vision'; Note = 'Entex' }
+  'amiga1200'      = @{ Platform = 'Amiga 1200/AGA'; Note = 'Commodore' }
+  'amiga500'       = @{ Platform = 'Amiga 500/OCS/ECS'; Note = 'Commodore' }
+  'amigacd32'      = @{ Platform = 'Amiga CD32'; Note = 'Commodore' }
+  'amigacdtv'      = @{ Platform = 'Commodore CDTV'; Note = 'Commodore' }
+  'amstradcpc'     = @{ Platform = 'Amstrad CPC'; Note = 'Amstrad' }
+  'apfm1000'       = @{ Platform = 'APF-MP1000/MP-1000/M-1000'; Note = 'APF Electronics Inc.' }
+  'apple2'         = @{ Platform = 'Apple II'; Note = 'Apple' }
+  'apple2gs'       = @{ Platform = 'Apple IIGS'; Note = 'Apple' }
+  'arcadia'        = @{ Platform = 'Arcadia 2001'; Note = 'Emerson Radio' }
+  'archimedes'     = @{ Platform = 'Archimedes'; Note = 'Acorn Computers' }
+  'arduboy'        = @{ Platform = 'Arduboy'; Note = 'Arduboy' }
+  'astrocde'       = @{ Platform = 'Astrocade'; Note = 'Bally/Midway' }
+  'atari2600'      = @{ Platform = 'Atari 2600/VCS'; Note = 'Atari' }
+  'atari5200'      = @{ Platform = 'Atari 5200'; Note = 'Atari' }
+  'atari7800'      = @{ Platform = 'Atari 7800'; Note = 'Atari' }
+  'atari800'       = @{ Platform = 'Atari 800'; Note = 'Atari' }
+  'atarist'        = @{ Platform = 'Atari ST'; Note = 'Atari' }
+  'atom'           = @{ Platform = 'Atom'; Note = 'Acorn Computers' }
+  'atomiswave'     = @{ Platform = 'Sammy Atomiswave'; Note = 'Sammy' }
+  'bbc'            = @{ Platform = 'BBC Micro/Master/Archimedes'; Note = 'Acorn Computers' }
+  'bennugd'        = @{ Platform = 'BennuGD'; Note = 'Game Development Suite' }
+  'boom3'          = @{ Platform = 'Doom 3'; Note = 'Port' }
+  'camplynx'       = @{ Platform = 'Camputers Lynx'; Note = 'Camputers' }
+  'cannonball'     = @{ Platform = 'Cannonball'; Note = 'Port' }
+  'casloopy'       = @{ Platform = 'Casio Loopy'; Note = 'Casio' }
+  'catacombgl'     = @{ Platform = 'Catacomb GL'; Note = 'Port' }
+  'cavestory'      = @{ Platform = 'Cave Story'; Note = 'Port' }
+  'c128'           = @{ Platform = 'Commodore 128'; Note = 'Commodore' }
+  'c20'            = @{ Platform = 'Commodore VIC-20/VC-20'; Note = 'Commodore' }
+  'c64'            = @{ Platform = 'Commodore 64'; Note = 'Commodore' }
+  'cdi'            = @{ Platform = 'Compact Disc Interactive/CD-i'; Note = 'Philips, et al.' }
+  'cdogs'          = @{ Platform = 'C-Dogs'; Note = 'Port' }
+  'cgenius'        = @{ Platform = 'Commander Genius (Commander Keen and Cosmos the Cosmic Adventure)'; Note = 'Port' }
+  'channelf'       = @{ Platform = 'Fairchild Channel F'; Note = 'Fairchild' }
+  'chihiro'        = @{ Platform = 'Chihiro'; Note = 'Sega' }
+  'coco'           = @{ Platform = 'TRS-80/Color Computer'; Note = 'Tandy/RadioShack' }
+  'colecovision'   = @{ Platform = 'ColecoVision'; Note = 'Coleco' }
+  'commanderx16'   = @{ Platform = 'Commander X16'; Note = 'David Murray' }
+  'corsixth'       = @{ Platform = 'CorsixTH (Theme Hospital)'; Note = 'Port' }
+  'cplus4'         = @{ Platform = 'Commodore Plus/4'; Note = 'Commodore' }
+  'crvision'       = @{ Platform = 'CreatiVision/Educat 2002/Dick Smith Wizzard/FunVision'; Note = 'VTech' }
+  'daphne'         = @{ Platform = 'DAPHNE Laserdisc'; Note = 'Various' }
+  'devilutionx'    = @{ Platform = 'DevilutionX (Diablo/Hellfire)'; Note = 'Port' }
+  'dice'           = @{ Platform = 'Discrete Integrated Circuit Emulator'; Note = 'Various' }
+  'dolphin'        = @{ Platform = 'Dolphin'; Note = 'GameCube/Wii Emulator' }
+  'dos'            = @{ Platform = 'DOSbox'; Note = 'Peter Veenstra/Sjoerd van der Berg' }
+  'dreamcast'      = @{ Platform = 'Dreamcast'; Note = 'Sega' }
+  'dxx-rebirth'    = @{ Platform = 'DXX Rebirth (Descent/Descent 2)'; Note = 'Port' }
+  'easyrpg'        = @{ Platform = 'EasyRPG (RPG Maker)'; Note = 'Port' }
+  'ecwolf'         = @{ Platform = 'Wolfenstein 3D'; Note = 'Port' }
+  'eduke32'        = @{ Platform = 'Duke Nukem 3D'; Note = 'Port' }
+  'electron'       = @{ Platform = 'Electron'; Note = 'Acorn Computers' }
+  'enterprise'     = @{ Platform = 'Enterprise'; Note = 'Enterprise Computers' }
+  'etlegacy'       = @{ Platform = 'ET Legacy (Enemy Territory: Quake Wars)'; Note = 'Port' }
+  'fallout1-ce'    = @{ Platform = 'Fallout CE'; Note = 'Port' }
+  'fallout2-ce'    = @{ Platform = 'Fallout2 CE'; Note = 'Port' }
+  'fbneo'          = @{ Platform = 'FinalBurn Neo'; Note = 'Various' }
+  'fds'            = @{ Platform = 'Family Computer Disk System/Famicom'; Note = 'Nintendo' }
+  'flash'          = @{ Platform = 'Flashpoint (Adobe Flash)'; Note = 'Bluemaxima' }
+  'flatpak'        = @{ Platform = 'Flatpak'; Note = 'Linux' }
+  'fm7'            = @{ Platform = 'Fujitsu Micro 7'; Note = 'Fujitsu' }
+  'fmtowns'        = @{ Platform = 'FM Towns/Towns Marty'; Note = 'Fujitsu' }
+  'fpinball'       = @{ Platform = 'Future Pinball'; Note = 'Port' }
+  'fury'           = @{ Platform = 'Ion Fury'; Note = 'Port' }
+  'gamate'         = @{ Platform = 'Gamate/Super Boy/Super Child Prodigy'; Note = 'Bit Corporation' }
+  'gameandwatch'   = @{ Platform = 'Game & Watch'; Note = 'Nintendo' }
+  'gamecom'        = @{ Platform = 'Game.com'; Note = 'Tiger Electronics' }
+  'gamecube'       = @{ Platform = 'GameCube'; Note = 'Nintendo' }
+  'gamegear'       = @{ Platform = 'Game Gear'; Note = 'Sega' }
+  'gamepock'       = @{ Platform = 'Game Pocket Computer'; Note = 'Epoch' }
+  'gb'             = @{ Platform = 'Game Boy'; Note = 'Nintendo' }
+  'gb2players'     = @{ Platform = 'Game Boy 2 Players'; Note = 'Nintendo' }
+  'gba'            = @{ Platform = 'Game Boy Advance'; Note = 'Nintendo' }
+  'gbc'            = @{ Platform = 'Game Boy Color'; Note = 'Nintendo' }
+  'gbc2players'    = @{ Platform = 'Game Boy Color 2 Players'; Note = 'Nintendo' }
+  'gmaster'        = @{ Platform = 'Game Master/Systema 2000/Super Game/Game Tronic'; Note = 'Hartung, et al.' }
+  'gp32'           = @{ Platform = 'GP32'; Note = 'Game Park' }
+  'gx4000'         = @{ Platform = 'Amstrad GX4000'; Note = 'Amstrad' }
+  'gzdoom'         = @{ Platform = 'GZDoom (Boom/Chex Quest/Heretic/Hexen/Strife)'; Note = 'Port' }
+  'hcl'            = @{ Platform = 'Hydra Castle Labyrinth'; Note = 'Port' }
+  'hurrican'       = @{ Platform = 'Hurrican'; Note = 'Port' }
+  'ikemen'         = @{ Platform = 'Ikemen Go'; Note = 'Port' }
+  'intellivision'  = @{ Platform = 'Intellivision'; Note = 'Mattel' }
+  'iortcw'         = @{ Platform = 'io Return to Castle Wolfenstein'; Note = 'Port' }
+  'jaguar'         = @{ Platform = 'Atari Jaguar'; Note = 'Atari' }
+  'jaguarcd'       = @{ Platform = 'Atari Jaguar CD'; Note = 'Atari' }
+  'laser310'       = @{ Platform = 'Laser 310'; Note = 'Video Technology (VTech)' }
+  'lcdgames'       = @{ Platform = 'Handheld LCD Games'; Note = 'Various' }
+  'lindbergh'      = @{ Platform = 'Lindbergh'; Note = 'Sega' }
+  'lowresnx'       = @{ Platform = 'Lowres NX'; Note = 'Timo Kloss' }
+  'lutro'          = @{ Platform = 'Lutro'; Note = 'Port' }
+  'lynx'           = @{ Platform = 'Atari Lynx'; Note = 'Atari' }
+  'macintosh'      = @{ Platform = 'Macintosh 128K'; Note = 'Apple' }
+  'mame'           = @{ Platform = 'Multiple Arcade Machine Emulator'; Note = 'Various' }
+  'mame/model1'    = @{ Platform = 'Model 1'; Note = 'Sega' }
+  'mastersystem'   = @{ Platform = 'Master System/Mark III'; Note = 'Sega' }
+  'megaduck'       = @{ Platform = 'Mega Duck/Cougar Boy'; Note = 'Welback Holdings' }
+  'megadrive'      = @{ Platform = 'Genesis/Mega Drive'; Note = 'Sega' }
+  'model2'         = @{ Platform = 'Model 2'; Note = 'Sega' }
+  'model3'         = @{ Platform = 'Model 3'; Note = 'Sega' }
+  'moonlight'      = @{ Platform = 'Moonlight'; Note = 'Port' }
+  'mrboom'         = @{ Platform = 'Mr. Boom'; Note = 'Port' }
+  'msu-md'         = @{ Platform = 'MSU-MD'; Note = 'Sega' }
+  'msx1'           = @{ Platform = 'MSX1'; Note = 'Microsoft' }
+  'msx2'           = @{ Platform = 'MSX2'; Note = 'Microsoft' }
+  'msx2+'          = @{ Platform = 'MSX2plus'; Note = 'Microsoft' }
+  'msxturbor'      = @{ Platform = 'MSX TurboR'; Note = 'Microsoft' }
+  'multivision'    = @{ Platform = 'Othello_Multivision'; Note = 'Tsukuda Original' }
+  'mugen'          = @{ Platform = 'M.U.G.E.N'; Note = 'Port' }
+  'n64'            = @{ Platform = 'Nintendo 64'; Note = 'Nintendo' }
+  'n64dd'          = @{ Platform = 'Nintendo 64DD'; Note = 'Nintendo' }
+  'namco2x6'       = @{ Platform = 'Namco System 246'; Note = 'Sony / Namco' }
+  'naomi'          = @{ Platform = 'NAOMI'; Note = 'Sega' }
+  'naomi2'         = @{ Platform = 'NAOMI 2'; Note = 'Sega' }
+  'nds'            = @{ Platform = 'Nintendo DS'; Note = 'Nintendo' }
+  'neogeo'         = @{ Platform = 'Neo Geo'; Note = 'SNK' }
+  'neogeocd'       = @{ Platform = 'Neo Geo CD'; Note = 'SNK' }
+  'nes'            = @{ Platform = 'Nintendo Entertainment System/Famicom'; Note = 'Nintendo' }
+  'ngp'            = @{ Platform = 'Neo Geo Pocket'; Note = 'SNK' }
+  'ngpc'           = @{ Platform = 'Neo Geo Pocket Color'; Note = 'SNK' }
+  'o2em'           = @{ Platform = 'Odyssey 2/Videopac G7000'; Note = 'Magnavox/Philips' }
+  'odcommander'    = @{ Platform = 'OD Commander'; Note = 'Port File Manager' }
+  'odyssey2'       = @{ Platform = 'Odyssey 2/Videopac G7000'; Note = 'Magnavox/Philips' }
+  'openbor'        = @{ Platform = 'Open Beats of Rage'; Note = 'Port' }
+  'openjazz'       = @{ Platform = 'Openjazz'; Note = 'Port' }
+  'openlara'       = @{ Platform = 'Tomb Raider'; Note = 'Port' }
+  'oricatmos'      = @{ Platform = 'Oric Atmos'; Note = 'Tangerine Computer Systems' }
+  'pc60'           = @{ Platform = 'NEC PC-6000'; Note = 'NEC' }
+  'pc88'           = @{ Platform = 'NEC PC-8800'; Note = 'NEC' }
+  'pc98'           = @{ Platform = 'NEC PC-9800/PC-98'; Note = 'NEC' }
+  'pcengine'       = @{ Platform = 'PC Engine/TurboGrafx-16'; Note = 'NEC' }
+  'pcenginecd'     = @{ Platform = 'PC Engine CD-ROM2/Duo R/Duo RX/TurboGrafx CD/TurboDuo'; Note = 'NEC' }
+  'pcfx'           = @{ Platform = 'NEC PC-FX'; Note = 'NEC' }
+  'pdp1'           = @{ Platform = 'PDP-1'; Note = 'Digital Equipment Corporation' }
+  'pet'            = @{ Platform = 'Commodore PET'; Note = 'Commodore' }
+  'pico'           = @{ Platform = 'Pico'; Note = 'Sega' }
+  'pico8'          = @{ Platform = 'PICO-8 Fantasy Console'; Note = 'Lexaloffle Games' }
+  'plugnplay'      = @{ Platform = 'Plug ''n'' Play/Handheld TV Games'; Note = 'Various' }
+  'pokemini'       = @{ Platform = 'Pokemon Mini'; Note = 'Nintendo' }
+  'ports'          = @{ Platform = 'Native ports'; Note = 'Linux' }
+  'prboom'         = @{ Platform = 'Proff Boom'; Note = 'Port' }
+  'ps2'            = @{ Platform = 'PlayStation 2'; Note = 'Sony' }
+  'ps3'            = @{ Platform = 'PlayStation 3'; Note = 'Sony' }
+  'ps4'            = @{ Platform = 'PlayStation 4'; Note = 'Sony' }
+  'psp'            = @{ Platform = 'PlayStation Portable'; Note = 'Sony' }
+  'psvita'         = @{ Platform = 'Vita'; Note = 'Sony' }
+  'psx'            = @{ Platform = 'PlayStation'; Note = 'Sony' }
+  'pv1000'         = @{ Platform = 'Casio PV-1000'; Note = 'Casio' }
+  'pygame'         = @{ Platform = 'Python Games'; Note = 'Port' }
+  'pyxel'          = @{ Platform = 'Pyxel fantasy console'; Note = 'Takashi Kitao' }
+  'quake3'         = @{ Platform = 'Quake 3'; Note = 'Port' }
+  'raze'           = @{ Platform = 'Raze'; Note = 'Port' }
+  'reminiscence'   = @{ Platform = 'Reminiscence (Flashback Emulator)'; Note = 'Port' }
+  'retroarch'      = @{ Platform = 'RetroArch (Liberato)'; Note = 'Hans-Kristian "Themaister" Arntzen' }
+  'samcoupe'       = @{ Platform = 'SAM Coupe'; Note = 'Miles Gordon Technology' }
+  'satellaview'    = @{ Platform = 'Satellaview'; Note = 'Nintendo' }
+  'saturn'         = @{ Platform = 'Saturn'; Note = 'Sega' }
+  'scummvm'        = @{ Platform = 'ScummVM'; Note = 'Ludvig Strigeus/Vincent Hamm' }
+  'scv'            = @{ Platform = 'Super Cassette Vision'; Note = 'Epoch Co.' }
+  'sdlpop'         = @{ Platform = 'SDLPoP (Prince of Persia)'; Note = 'Port' }
+  'sega32x'        = @{ Platform = 'Sega 32X'; Note = 'Sega' }
+  'segacd'         = @{ Platform = 'Sega CD/Mega CD'; Note = 'Sega' }
+  'sg1000'         = @{ Platform = 'SG-1000/SG-1000 II/SC-3000'; Note = 'Sega' }
+  'sgb'            = @{ Platform = 'Super Game Boy'; Note = 'Nintendo' }
+  'sgb-msu1'       = @{ Platform = 'LADX-MSU1'; Note = 'Nintendo' }
+  'singe'          = @{ Platform = 'SINGE'; Note = 'Various' }
+  'snes'           = @{ Platform = 'Super Nintendo Entertainment System'; Note = 'Nintendo' }
+  'snes-msu1'      = @{ Platform = 'Super NES CD-ROM/SNES MSU-1'; Note = 'Nintendo' }
+  'socrates'       = @{ Platform = 'Socrates'; Note = 'VTech' }
+  'solarus'        = @{ Platform = 'Solarus'; Note = 'Port' }
+  'sonic-mania'    = @{ Platform = 'Sonic Mania'; Note = 'Port' }
+  'sonic3-air'     = @{ Platform = 'Sonic 3 Angel Island Revisited'; Note = 'Port' }
+  'sonicretro'     = @{ Platform = 'Star Engine/Sonic Retro Engine'; Note = 'Port' }
+  'spectravideo'   = @{ Platform = 'Spectravideo'; Note = 'Spectravideo' }
+  'steam'          = @{ Platform = 'Steam'; Note = 'Valve' }
+  'sufami'         = @{ Platform = 'SuFami Turbo'; Note = 'Bandai' }
+  'superbroswar'   = @{ Platform = 'Super Mario War'; Note = 'Port' }
+  'supergrafx'     = @{ Platform = 'PC Engine/SuperGrafx/PC Engine 2'; Note = 'NEC' }
+  'supervision'    = @{ Platform = 'Watara Supervision'; Note = 'Watara' }
+  'supracan'       = @{ Platform = 'Super A''Can'; Note = 'Funtech Entertainment' }
+  'switch'         = @{ Platform = 'Switch'; Note = 'Nintendo' }
+  'systemsp'       = @{ Platform = 'Sega System SP'; Note = 'Sega' }
+  'theforceengine' = @{ Platform = 'The Force Engine (Star Wars: Dark Forces)'; Note = 'Port' }
+  'thextech'       = @{ Platform = 'TheXTech (Mega man)'; Note = 'Sinclair' }
+  'thomson'        = @{ Platform = 'Thomson MO/TO Series Computer'; Note = 'Thomson' }
+  'ti99'           = @{ Platform = 'TI-99/4/4A'; Note = 'Texas Instruments' }
+  'tic80'          = @{ Platform = 'TIC-80 Fantasy Console'; Note = 'Vadim Grigoruk' }
+  'traider1'       = @{ Platform = 'TR1X (Tomb Raider 1)'; Note = 'Port' }
+  'traider2'       = @{ Platform = 'TR2X (Tomb Rauder 2)'; Note = 'Port' }
+  'triforce'       = @{ Platform = 'Triforce'; Note = 'Namco/Sega/Nintendo' }
+  'tutor'          = @{ Platform = 'Tomy Tutor/Pyuta/Grandstand Tutor'; Note = 'Tomy' }
+  'tyrain'         = @{ Platform = 'TyrQuake (Quake)'; Note = 'Port' }
+  'tyrquake'       = @{ Platform = 'TyrQuake (Quake 1)'; Note = 'Port' }
+  'uqm'            = @{ Platform = 'The Ur-Quan Master (Star Control II)'; Note = 'Port' }
+  'uzebox'         = @{ Platform = 'Uzebox Open-Source Console'; Note = 'Alec Bourque' }
+  'vectrex'        = @{ Platform = 'Vectrex'; Note = 'Milton Bradley' }
+  'vc4000'         = @{ Platform = 'Video Computer 4000'; Note = 'Interton' }
+  'vgmplay'        = @{ Platform = 'MAME Video Game Music Player'; Note = 'Various' }
+  'vircon32'       = @{ Platform = 'Vircon32 virtual console'; Note = 'Carra' }
+  'vis'            = @{ Platform = 'Video Information System'; Note = 'Tandy/Memorex' }
+  'vitaquake2'     = @{ Platform = 'PlayStation Vita port of Quake II'; Note = 'Port' }
+  'virtualboy'     = @{ Platform = 'Virtual Boy'; Note = 'Nintendo' }
+  'vpinball'       = @{ Platform = 'Visual Pinball'; Note = 'Port' }
+  'voxatron'       = @{ Platform = 'Voxatron fantasy console'; Note = 'Lexaloffle Games' }
+  'vsmile'         = @{ Platform = 'V.Smile (TV LEARNING SYSTEM)'; Note = 'VTech' }
+  'wasm4'          = @{ Platform = 'WASM4 fantasy console'; Note = 'Aduros' }
+  'wii'            = @{ Platform = 'Wii'; Note = 'Nintendo' }
+  'wiiu'           = @{ Platform = 'Wii U'; Note = 'Nintendo' }
+  'windows'        = @{ Platform = 'WINE'; Note = 'Bob Amstadt/Alexandre Julliard' }
+  'wswan'          = @{ Platform = 'WonderSwan'; Note = 'Bandai' }
+  'wswanc'         = @{ Platform = 'WonderSwan Color'; Note = 'Bandai' }
+  'x1'             = @{ Platform = 'Sharp X1'; Note = 'Sharp' }
+  'x68000'         = @{ Platform = 'Sharp X68000'; Note = 'Sharp' }
+  'xash3d_fwgs'    = @{ Platform = 'Xash3D FWGS (Valve Games)'; Note = 'Port' }
+  'xbox'           = @{ Platform = 'Xbox'; Note = 'Microsoft' }
+  'xbox360'        = @{ Platform = 'Xbox 360'; Note = 'Microsoft' }
+  'xegs'           = @{ Platform = 'Atari XEGS'; Note = 'Atari' }
+  'xrick'          = @{ Platform = 'Rick Dangerous'; Note = 'Port' }
+  'zx81'           = @{ Platform = 'Sinclair ZX81'; Note = 'Sinclair' }
+  'zxspectrum'     = @{ Platform = 'ZX Spectrum'; Note = 'Sinclair' }
 }
 
 # ==================================================================================================
 # FUNCTIONS
 # ==================================================================================================
 
+# --- FUNCTION: Get-PlatformInfo ---
+# PURPOSE:
+# - Translate a platform folder name (e.g., "psx") into a friendly platform name AND a Note.
+# NOTES:
+# - Falls back to returning the folder name as Platform and "" as Note if no translation is present.
+function Get-PlatformInfo {
+  param([string]$PlatformFolder)
+
+  if ($PlatformMap.ContainsKey($PlatformFolder)) {
+    $m = $PlatformMap[$PlatformFolder]
+    return [pscustomobject]@{
+      PlatformName = [string]$m.Platform
+      Note         = [string]$m.Note
+    }
+  }
+
+  return [pscustomobject]@{
+    PlatformName = [string]$PlatformFolder
+    Note         = ''
+  }
+}
+
 # --- FUNCTION: Get-FriendlyPlatformName ---
 # PURPOSE:
-# - Translate a platform folder name (e.g., "psx") into a friendly platform name (e.g., "PlayStation 1").
+# - Preserve existing callers that only need a name string.
 # NOTES:
-# - Falls back to returning the folder name if no translation is present in $PlatformNameMap.
+# - Returns the PlatformName portion of Get-PlatformInfo.
 function Get-FriendlyPlatformName {
   param([string]$PlatformFolder)
-  if ($PlatformNameMap.ContainsKey($PlatformFolder)) { return $PlatformNameMap[$PlatformFolder] }
-  return $PlatformFolder
+  return (Get-PlatformInfo -PlatformFolder $PlatformFolder).PlatformName
 }
 
 # --------------------------------------------------------------------------------------------------
@@ -417,6 +461,7 @@ function Get-TitleForOutput {
 # NOTES:
 # - If the script directory contains gamelist.xml, treat it as a single-platform run.
 # - Otherwise, treat the script directory as ROMS root and scan all first-level subfolders for gamelist.xml.
+# - In ROMS root mode, explicitly ignores non-platform folders (e.g. windows_installers).
 function Get-PlatformTargets {
   param([string]$StartDir)
 
@@ -430,8 +475,22 @@ function Get-PlatformTargets {
     })
   }
 
+  # Folder ignore list (ROMS root mode only)
+  # PURPOSE:
+  # - Prevent non-platform folders from being treated as platforms during discovery.
+  # NOTES:
+  # - Batocera ROMS roots often contain utility folders that can have deep structures but no gamelist.xml.
+  # - Keep this list minimal and explicit to avoid hiding legitimate platform folders.
+  $ignoredFolders = @(
+    'windows_installers'
+  )
+
   $targets = @()
   Get-ChildItem -LiteralPath $start -Directory | ForEach-Object {
+
+    # Ignore any known non-platform folders early (case-insensitive compare)
+    if ($ignoredFolders -contains $_.Name.ToLowerInvariant()) { return }
+
     $g = Join-Path $_.FullName 'gamelist.xml'
     if (Test-Path -LiteralPath $g) {
       $targets += [pscustomobject]@{
@@ -525,6 +584,9 @@ function Get-M3UDiskCount {
 function Read-Gamelist {
   param([string]$PlatformFolder, [string]$GamelistPath)
 
+  # Read full XML as a single raw string so we can:
+  # - Attempt a standard DOM parse first
+  # - Fall back to fragment salvage parsing if the document is malformed
   $raw = Get-Content -LiteralPath $GamelistPath -Raw
   if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
 
@@ -543,6 +605,8 @@ function Read-Gamelist {
 
   if ($parsedOk -and $null -ne $doc) {
 
+    # Normal parse path:
+    # - Use XPath with local-name() so namespaces don't break discovery
     $nodes = $null
     try {
       $nodes = $doc.SelectNodes("//*[local-name()='game']")
@@ -558,6 +622,10 @@ function Read-Gamelist {
         $hidden = Get-XmlNodeText -Node $node -ChildName 'hidden'
 
         $resolvedName = Get-DisplayNameFallback -Name $name -Path $path
+
+        # GroupKey determines multi-disk grouping:
+        # - Prefer resolvedName (human-friendly and stable)
+        # - Fall back to path when name is missing to avoid unrelated collisions
         $groupKey     = if (-not [string]::IsNullOrWhiteSpace($resolvedName)) { $resolvedName } else { [string]$path }
 
         $out += [pscustomobject]@{
@@ -574,6 +642,10 @@ function Read-Gamelist {
     return $out
   }
 
+  # Salvage mode:
+  # - Extract <game>...</game> blocks with regex
+  # - Parse each block as a fragment XML document
+  # - This allows recovery even when the overall gamelist.xml is malformed
   $gameBlocks = [regex]::Matches($raw, '(?is)<game\b[^>]*>.*?</game>')
 
   foreach ($m in $gameBlocks) {
@@ -631,6 +703,8 @@ function Write-CsvUtf8NoBom {
     [Parameter(Mandatory=$true)][string]$Path
   )
 
+  # ConvertTo-Csv produces a standards-compliant CSV with consistent quoting and comma separators.
+  # We then write it as UTF-8 without BOM for maximum compatibility.
   $csvLines = @($Rows | ConvertTo-Csv -NoTypeInformation)
 
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -669,13 +743,16 @@ foreach ($t in $targets) {
   if ($isRomsRootMode) {
     Write-Host ""
     $pf = [string]$t.PlatformFolder
-    $pn = Get-FriendlyPlatformName $pf
-    Write-Host ("{0} - {1}" -f $pf, $pn) -ForegroundColor Green
+    $pi = Get-PlatformInfo $pf
+    Write-Host ("{0} | {1}" -f $pf, $pi.PlatformName) -ForegroundColor Green
   }
 
   $platformFolder = [string]$t.PlatformFolder
-  $platformName   = Get-FriendlyPlatformName $platformFolder
+  $platformInfo   = Get-PlatformInfo $platformFolder
+  $platformName   = [string]$platformInfo.PlatformName
+  $platformNote   = [string]$platformInfo.Note
 
+  # Read and normalize all <game> entries for the platform (normal parse or salvage mode).
   $entries = @(Read-Gamelist $platformFolder $t.GamelistPath)
   if ($entries.Count -eq 0) {
     if ($isRomsRootMode) {
@@ -685,12 +762,17 @@ foreach ($t in $targets) {
     continue
   }
 
+  # Group entries into "sets" so multi-disk collections can be inferred from:
+  # - .m3u visible entries (Multi-M3U)
+  # - multiple entries sharing the group key where additional disks are hidden (Multi-XML)
   foreach ($group in @($entries | Group-Object GroupKey)) {
 
     $items        = @($group.Group)
     $hiddenItems  = @($items | Where-Object { $_.Hidden })
     $visibleItems = @($items | Where-Object { -not $_.Hidden })
 
+    # Defensive behavior:
+    # - If every entry in a group is hidden, still emit one row (otherwise the group disappears from the report).
     if ($visibleItems.Count -eq 0 -and $items.Count -gt 0) {
       $visibleItems = @($items | Select-Object -First 1)
     }
@@ -700,6 +782,9 @@ foreach ($t in $targets) {
       $pathStr = [string]$g.PathRaw
       $nameStr = [string]$g.NameResolved
 
+      # Determine multi-disk behavior based on:
+      # - .m3u path (Multi-M3U)
+      # - presence of hidden sibling entries within the group (Multi-XML)
       $entryType = 'Single'
       if ($pathStr -match '(?i)\.m3u$') {
         $entryType = 'Multi-M3U'
@@ -718,6 +803,7 @@ foreach ($t in $targets) {
 
       if ($entryType -eq 'Multi-M3U') {
 
+        # Resolve .m3u path relative to the platform root folder when the gamelist uses ./ style paths.
         $platformRoot = $startDir
         if ($isRomsRootMode) {
           $platformRoot = Join-Path $startDir $platformFolder
@@ -743,7 +829,8 @@ foreach ($t in $targets) {
       # Build output row in the exact column order expected for the CSV export
       $rows += [pscustomobject]@{
         Title          = $title
-        PlatformName   = [string]$platformName
+        PlatformName   = $platformName
+        Note           = $platformNote
         EntryType      = [string]$entryType
         DiskCount      = [int]$diskCount
         PlatformFolder = $platformFolder
@@ -766,6 +853,9 @@ Write-Phase "Finished collecting game entries."
 
 Write-Phase "Sorting and exporting CSV..."
 
+# Sort for human browsing:
+# - PlatformName groups platforms logically
+# - Title alphabetizes games within a platform
 $rows = @($rows | Sort-Object PlatformName, Title)
 
 $outPath = Join-Path $startDir 'Game List.csv'
@@ -826,8 +916,8 @@ if ($malformedPlatforms.Count -gt 0) {
   }
 
   Write-Host ""
-  Write-Host "Game entries were recovered successfully, but the source files" -ForegroundColor Yellow
-  Write-Host "should be regenerated or repaired (e.g. via a gamelist update/scrape)." -ForegroundColor Yellow
+  Write-Host "Game entries were recovered successfully, but the source files should be" -ForegroundColor Yellow
+  Write-Host "regenerated or repaired (e.g. via a gamelist update/scrape, manual edit, etc.)." -ForegroundColor Yellow
 }
 
 # --------------------------------------------------------------------------------------------------
