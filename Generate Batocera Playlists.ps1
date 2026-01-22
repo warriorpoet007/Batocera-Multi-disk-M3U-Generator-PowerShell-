@@ -85,7 +85,7 @@ BREAKDOWN
         - suppressed by [!] preference rule
         - alt fallback issues
         - disk total mismatch issues
-        - no entry in gamelist.xml (run gamelist update, scrap the game or manually add it into gamelist.xml)
+        - no entry in gamelist.xml (run gamelist update, scrape the game or manually add it into gamelist.xml)
 - Reporting and summary output
     - Clean split into:
         - M3U PLAYLISTS (created + suppressed)
@@ -500,7 +500,7 @@ function Hide-GameEntriesInGamelist {
 
             [void]$noM3UMissingGamelistEntries.Add([PSCustomObject]@{
                 FullPath = $t.FullPath
-                Reason   = "No entry in gamelist.xml (run gamelist update, scrap the game or manually add it into gamelist.xml)"
+                Reason   = "No entry in gamelist.xml (run gamelist update, scrape the game or manually add it into gamelist.xml)"
             })
 
             $result.MissingCount++
@@ -519,7 +519,7 @@ function Hide-GameEntriesInGamelist {
             $noM3UMissingGamelistEntryByFullPath[$t.FullPath] = $true
             [void]$noM3UMissingGamelistEntries.Add([PSCustomObject]@{
                 FullPath = $t.FullPath
-                Reason   = "No entry in gamelist.xml (run gamelist update, scrap the game or manually add it into gamelist.xml)"
+                Reason   = "No entry in gamelist.xml (run gamelist update, scrape the game or manually add it into gamelist.xml)"
             })
             $result.MissingCount++
             continue
@@ -621,7 +621,7 @@ function Hide-GameEntriesInGamelist {
             $noM3UMissingGamelistEntryByFullPath[$t.FullPath] = $true
             [void]$noM3UMissingGamelistEntries.Add([PSCustomObject]@{
                 FullPath = $t.FullPath
-                Reason   = "No entry in gamelist.xml (run gamelist update, scrap the game or manually add it into gamelist.xml)"
+                Reason   = "No entry in gamelist.xml (run gamelist update, scrape the game or manually add it into gamelist.xml)"
             })
             $result.MissingCount++
         }
@@ -651,7 +651,7 @@ function Unhide-GameEntriesInGamelist {
             $noM3UMissingGamelistEntryByFullPath[$t.FullPath] = $true
             [void]$noM3UMissingGamelistEntries.Add([PSCustomObject]@{
                 FullPath = $t.FullPath
-                Reason   = "No entry in gamelist.xml (run gamelist update, scrap the game or manually add it into gamelist.xml)"
+                Reason   = "No entry in gamelist.xml (run gamelist update, scrape the game or manually add it into gamelist.xml)"
             })
             $result.MissingCount++
         }
@@ -669,7 +669,7 @@ function Unhide-GameEntriesInGamelist {
             $noM3UMissingGamelistEntryByFullPath[$t.FullPath] = $true
             [void]$noM3UMissingGamelistEntries.Add([PSCustomObject]@{
                 FullPath = $t.FullPath
-                Reason   = "No entry in gamelist.xml (run gamelist update, scrap the game or manually add it into gamelist.xml)"
+                Reason   = "No entry in gamelist.xml (run gamelist update, scrape the game or manually add it into gamelist.xml)"
             })
             $result.MissingCount++
             continue
@@ -752,7 +752,7 @@ function Unhide-GameEntriesInGamelist {
             $noM3UMissingGamelistEntryByFullPath[$t.FullPath] = $true
             [void]$noM3UMissingGamelistEntries.Add([PSCustomObject]@{
                 FullPath = $t.FullPath
-                Reason   = "No entry in gamelist.xml (run gamelist update, scrap the game or manually add it into gamelist.xml)"
+                Reason   = "No entry in gamelist.xml (run gamelist update, scrape the game or manually add it into gamelist.xml)"
             })
             $result.MissingCount++
         }
@@ -1599,7 +1599,7 @@ foreach ($g in $groupsForNotUsed) {
             if ($noM3UMissingGamelistEntryByFullPath.ContainsKey($full)) {
                 [void]$notInPlaylists.Add([PSCustomObject]@{
                     FullPath = $full
-                    Reason   = "No entry in gamelist.xml (run gamelist update, scrap the game or manually add it into gamelist.xml)"
+                    Reason   = "No entry in gamelist.xml (run gamelist update, scrape the game or manually add it into gamelist.xml)"
                 })
             } else {
                 [void]$notInPlaylists.Add([PSCustomObject]@{
@@ -1666,7 +1666,7 @@ foreach ($g in $groupsForNotUsed) {
         if ($noM3UMissingGamelistEntryByFullPath.ContainsKey($full)) {
             [void]$notInPlaylists.Add([PSCustomObject]@{
                 FullPath = $full
-                Reason   = "No entry in gamelist.xml (run gamelist update, scrap the game or manually add it into gamelist.xml)"
+                Reason   = "No entry in gamelist.xml (run gamelist update, scrape the game or manually add it into gamelist.xml)"
             })
             continue
         }
