@@ -306,7 +306,7 @@ $PlatformMap = @{
   'vectrex'        = @{ Platform = 'Vectrex'; Note = 'Milton Bradley' }
   'vc4000'         = @{ Platform = 'Video Computer 4000'; Note = 'Interton' }
   'vgmplay'        = @{ Platform = 'MAME Video Game Music Player'; Note = 'Various' }
-  'vircon32'       = @{ Platform = 'Vircon32 virtual console'; Note = 'Carra' }
+  'vircon32'       = @{ Platform = 'Vircon32 Virtual Console'; Note = 'Carra' }
   'vis'            = @{ Platform = 'Video Information System'; Note = 'Tandy/Memorex' }
   'vitaquake2'     = @{ Platform = 'PlayStation Vita port of Quake II'; Note = 'Port' }
   'virtualboy'     = @{ Platform = 'Virtual Boy'; Note = 'Nintendo' }
