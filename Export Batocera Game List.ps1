@@ -25,6 +25,19 @@ NOTES:
     - If running from ROMS root (multi-platform mode), prints per-platform start + finished lines
     - Always prints a final "finished" summary
 
+IMPORTANT NOTE
+- For multi-disk games, they must each have the same name in gamelist.xml, as this is what's used by the script to group them
+    - In the example below, a game with three disks/filenames/paths are all part of the same game with the same name:
+
+        <path>./Game ROM Image (Disk 1).chd</path>
+        <name>Name Of the Game</name>
+
+        <path>./Game ROM Image (Disk 2).chd</path>
+        <name>Name Of the Game</name>
+
+        <path>./Game ROM Image (Disk 3).chd</path>
+        <name>Name Of the Game</name>
+
 BREAKDOWN
 - Determines runtime mode based on where the script is located:
     - If a gamelist.xml exists in the script directory, treat it as a single-platform run
