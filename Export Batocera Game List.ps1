@@ -1,6 +1,6 @@
 <#
 PURPOSE: Export a master list of games across Batocera platform folders by reading each platform's gamelist.xml
-VERSION: 1.1
+VERSION: 1.2
 AUTHOR: Devin Kelley, Distant Thunderworks LLC
 
 NOTES:
@@ -18,6 +18,9 @@ NOTES:
     - Some gamelist.xml files in the wild can be malformed (mismatched tags, partial writes, etc.).
     - This script will attempt a normal XML parse first, and if that fails it will fall back to a "salvage mode"
       that extracts <game>...</game> blocks and parses them individually.
+- Identifies non-game ROMs via entries that include "ZZZ(notgame):" in the <name> tag in gamelist.xml
+    - Removes "ZZZ(notgame):" before it writes the Title
+    - Designates this ROM type with a "Game?" column in the CSV file, with a "No" (listings with "Yes" are games)
 - XMLState column:
     - Normal: gamelist.xml parsed cleanly as a complete XML document
     - Malformed: gamelist.xml was malformed; entries were extracted by parsing <game> fragments
@@ -28,6 +31,7 @@ NOTES:
 
 IMPORTANT NOTE
 - For non-M3U multi-disk games, they must each have the same name in gamelist.xml, as this is what's used by the script to group them
+    - Generate Batocera Playlists.ps1 does attempt to do this by populating <name> in gamelist.xml, but this note is here for awareness
     - In the example below, a game with three disks/filenames/paths are all part of the same game with the same name:
 
         <path>./Game ROM Image (Disk 1).chd</path>
@@ -253,7 +257,7 @@ $PlatformMap = @{
   'pc88'           = @{ Platform = 'NEC PC-8800'; Manufacturer = 'NEC' }
   'pc98'           = @{ Platform = 'NEC PC-9800/PC-98'; Manufacturer = 'NEC' }
   'pcengine'       = @{ Platform = 'PC Engine/TurboGrafx-16'; Manufacturer = 'NEC' }
-  'pcenginecd'     = @{ Platform = 'PC Engine CD-ROM2/Duo R/Duo RX/TurboGrafx CD/TurboDuo'; Manufacturer = 'NEC' }
+  'pcenginecd'     = @{ Platform = 'PC Engine CD-ROM2/Duo R/Duo RX/TurboGrafx CD/TurboGrafx CD/TurboDuo'; Manufacturer = 'NEC' }
   'pcfx'           = @{ Platform = 'NEC PC-FX'; Manufacturer = 'NEC' }
   'pdp1'           = @{ Platform = 'PDP-1'; Manufacturer = 'Digital Equipment Corporation' }
   'pet'            = @{ Platform = 'Commodore PET'; Manufacturer = 'Commodore' }
@@ -356,8 +360,10 @@ $PlatformMap = @{
 function Get-PlatformInfo {
   param([string]$PlatformFolder)
 
-  if ($PlatformMap.ContainsKey($PlatformFolder)) {
-    $m = $PlatformMap[$PlatformFolder]
+  $k = ([string]$PlatformFolder).ToLowerInvariant()
+
+  if ($PlatformMap.ContainsKey($k)) {
+    $m = $PlatformMap[$k]
     return [pscustomobject]@{
       PlatformName = [string]$m.Platform
       Manufacturer = [string]$m.Manufacturer
@@ -568,7 +574,14 @@ function Get-M3UDiskCount {
 
   $usable = @(
     $lines |
-      ForEach-Object { if ($null -eq $_) { '' } else { ([string]$_).Trim() } } |
+      ForEach-Object {
+        if ($null -eq $_) { '' }
+        else {
+          $s = ([string]$_)
+          $s = $s.TrimStart([char]0xFEFF)
+          $s.Trim()
+        }
+      } |
       Where-Object { $_ -ne '' -and (-not $_.StartsWith('#')) }
   )
 
@@ -638,12 +651,13 @@ function Read-Gamelist {
         $resolvedName = Get-DisplayNameFallback -Name $name -Path $path
 
         # GroupKey determines multi-disk grouping:
-        # - Prefer resolvedName (human-friendly and stable)
+        # - Prefer the raw <name> when present (stable grouping)
         # - Fall back to path when name is missing to avoid unrelated collisions
-        $groupKey     = if (-not [string]::IsNullOrWhiteSpace($resolvedName)) { $resolvedName } else { [string]$path }
+        $groupKey     = if (-not [string]::IsNullOrWhiteSpace($name)) { $name.Trim() } else { [string]$path }
 
         $out += [pscustomobject]@{
           PlatformFolder = $PlatformFolder
+          NameRaw        = [string]$name
           NameResolved   = [string]$resolvedName
           PathRaw        = [string]$path
           Hidden         = ($hidden -match '^(true|1|yes)$')
@@ -690,10 +704,11 @@ function Read-Gamelist {
     $hidden = Get-XmlNodeText -Node $node -ChildName 'hidden'
 
     $resolvedName = Get-DisplayNameFallback -Name $name -Path $path
-    $groupKey     = if (-not [string]::IsNullOrWhiteSpace($resolvedName)) { $resolvedName } else { [string]$path }
+    $groupKey     = if (-not [string]::IsNullOrWhiteSpace($name)) { $name.Trim() } else { [string]$path }
 
     $out += [pscustomobject]@{
       PlatformFolder = $PlatformFolder
+      NameRaw        = [string]$name
       NameResolved   = [string]$resolvedName
       PathRaw        = [string]$path
       Hidden         = ($hidden -match '^(true|1|yes)$')
@@ -791,10 +806,30 @@ foreach ($t in $targets) {
       $visibleItems = @($items | Select-Object -First 1)
     }
 
+    # One row per set:
+    # - If multiple entries are visible in the same group, pick a stable representative
+    #   (otherwise the set would emit multiple rows).
+    if ($visibleItems.Count -gt 1) {
+      $visibleItems = @($visibleItems | Sort-Object PathRaw | Select-Object -First 1)
+    }
+
     foreach ($g in $visibleItems) {
 
-      $pathStr = [string]$g.PathRaw
-      $nameStr = [string]$g.NameResolved
+      $pathStr  = [string]$g.PathRaw
+      $nameStr  = [string]$g.NameResolved
+      $nameRaw  = [string]$g.NameRaw
+
+      $isNotGame = $false
+      if (-not [string]::IsNullOrWhiteSpace($nameRaw)) {
+        $isNotGame = ($nameRaw -match '(?i)^\s*ZZZ\(notgame\):')
+      }
+
+      $gameFlag = if ($isNotGame) { 'No' } else { 'Yes' }
+
+      $titleName = $nameStr
+      if ($isNotGame) {
+        $titleName = ($titleName -replace '(?i)^\s*ZZZ\(notgame\):\s*', '')
+      }
 
       # Determine multi-disk behavior based on:
       # - .m3u path (Multi-M3U)
@@ -807,7 +842,7 @@ foreach ($t in $targets) {
         $entryType = 'Multi-XML'
       }
 
-      $title = Get-TitleForOutput -ResolvedName $nameStr
+      $title = Get-TitleForOutput -ResolvedName $titleName
 
       # DiskCount handling is based on the inferred entry type:
       # - Multi-M3U: read the .m3u file and count usable entries
@@ -831,6 +866,12 @@ foreach ($t in $targets) {
           $m3uFullPath = Join-Path $platformRoot $rel
         }
 
+        try {
+          $m3uFullPath = (Resolve-Path -LiteralPath $m3uFullPath -ErrorAction Stop).Path
+        } catch {
+          # Leave as-is; Get-M3UDiskCount will safely return 1 if unreadable/unresolvable.
+        }
+
         $diskCount = Get-M3UDiskCount -M3UPath $m3uFullPath
       }
       elseif ($entryType -eq 'Multi-XML') {
@@ -845,6 +886,7 @@ foreach ($t in $targets) {
         Title          = $title
         PlatformName   = $platformName
         Manufacturer   = $platformManufacturer
+        'Game?'        = [string]$gameFlag
         EntryType      = [string]$entryType
         DiskCount      = [int]$diskCount
         PlatformFolder = $platformFolder
