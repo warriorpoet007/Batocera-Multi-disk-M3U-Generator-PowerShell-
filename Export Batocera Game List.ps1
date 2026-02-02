@@ -257,7 +257,7 @@ $PlatformMap = @{
   'pc88'           = @{ Platform = 'NEC PC-8800'; Manufacturer = 'NEC' }
   'pc98'           = @{ Platform = 'NEC PC-9800/PC-98'; Manufacturer = 'NEC' }
   'pcengine'       = @{ Platform = 'PC Engine/TurboGrafx-16'; Manufacturer = 'NEC' }
-  'pcenginecd'     = @{ Platform = 'PC Engine CD-ROM2/Duo R/Duo RX/TurboGrafx CD/TurboGrafx CD/TurboDuo'; Manufacturer = 'NEC' }
+  'pcenginecd'     = @{ Platform = 'PC Engine CD-ROM2/Duo R/Duo RX/TurboGrafx CD/TurboDuo'; Manufacturer = 'NEC' }
   'pcfx'           = @{ Platform = 'NEC PC-FX'; Manufacturer = 'NEC' }
   'pdp1'           = @{ Platform = 'PDP-1'; Manufacturer = 'Digital Equipment Corporation' }
   'pet'            = @{ Platform = 'Commodore PET'; Manufacturer = 'Commodore' }
