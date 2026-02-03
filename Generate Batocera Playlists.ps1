@@ -1,6 +1,6 @@
 <#
 PURPOSE: Create .m3u files for each multi-disk game and insert the list of game filenames into the playlist or update gamelist.xml
-VERSION: 1.5
+VERSION: 1.6
 AUTHOR: Devin Kelley, Distant Thunderworks LLC
 
 NOTES:
@@ -169,6 +169,10 @@ $gamelistAlreadyHiddenCounts   = @{}  # platform label -> count already hidden (
 
 $gamelistUnhiddenCounts        = @{}  # platform label -> count newly unhidden
 $gamelistAlreadyVisibleCounts  = @{}  # platform label -> count already visible (no change)
+
+# [PHASE 0] Track NON-M3U entries that SHOULD be hidden per platform (for Phase 3.5 reconciliation)
+$noM3UShouldBeHiddenByPlatform = @{}  # platformLower -> hashtable fullPath -> relPath
+$noM3UPlatformsEncountered     = @{}  # platformLower -> $true
 
 # ==================================================================================================
 # PHASE 0.5: FUNCTIONS
@@ -572,6 +576,32 @@ function Get-GamelistNameByRelPath {
     }
 
     return $null
+}
+
+# Build a fast lookup set of all <path> values present in a gamelist.xml line array
+function Get-GamelistPathIndex {
+    param(
+        [Parameter(Mandatory=$true)]$Lines
+    )
+
+    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    if ($null -eq $Lines) { return $set }
+
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        $line = $Lines[$i]
+        if ($null -eq $line) { continue }
+
+        $m = [regex]::Match($line, '^\s*<path>\s*(?<V>.*?)\s*</path>\s*$')
+        if ($m.Success) {
+            $v = $m.Groups['V'].Value
+            if (-not [string]::IsNullOrWhiteSpace($v)) {
+                [void]$set.Add($v)
+            }
+        }
+    }
+
+    return $set
 }
 
 # Returns $true if the file is inside any folder whose name is in $skipFolders (at any depth)
@@ -1279,7 +1309,7 @@ function Select-DiskEntries {
 $parsed = @()
 
 # Display scan banner
-Write-Phase "Collecting ROM file data (scanning folders, which might take a while)..."
+Write-Phase "Collecting ROM file data (scanning folders)..."
 
 # Enumerate candidate ROM files and parse disk/side patterns
 Get-ChildItem -Path $scriptDir -File -Recurse -Depth 2 | ForEach-Object {
@@ -1519,6 +1549,11 @@ foreach ($group in $groupsStrict) {
             # Respect "skip" mode for NON-M3U platforms
             if ($isNoM3U -and $noM3UPlatformMode -ieq "skip") { continue }
 
+            # Track encountered NON-M3U platforms for Phase 3.5
+            if ($isNoM3U -and $null -ne $platformRoot) {
+                $noM3UPlatformsEncountered[$platformRoot.ToLowerInvariant()] = $true
+            }
+
             # Sort final set entries into disk/side order
             $sorted = $playlistFiles | Sort-Object DiskSort, SideSort
 
@@ -1700,6 +1735,11 @@ foreach ($group in $groupsStrict) {
                 $primaryFull = Join-Path $primaryObj.Directory $primaryObj.FileName
                 $usedFiles[$primaryFull] = $true
 
+                # Resolve platform gamelist state first (rootPath/state are required below)
+                $platformLower = $platformRoot.ToLowerInvariant()
+                $rootPath = Get-PlatformRootPath -ScriptDir $scriptDir -PlatformRootName $platformLower
+                $state = Ensure-GamelistLoaded -PlatformRootLower $platformLower -PlatformRootPath $rootPath
+
                 # Ensure primary is not hidden (safety: primary must be visible)
                 $primaryRel = Get-RelativeGamelistPath -PlatformRootPath $rootPath -FileFullPath $primaryFull
                 $primaryTarget = @([PSCustomObject]@{
@@ -1779,7 +1819,7 @@ foreach ($group in $groupsStrict) {
                     continue
                 }
 
-                # Identify Disk 2+ entries to hide
+                # Identify Disk 2+ entries to hide (secondary entries)
                 $toHide = @(
                     $sorted | Where-Object { (Join-Path $_.Directory $_.FileName) -ne $primaryFull }
                 )
@@ -1807,6 +1847,60 @@ foreach ($group in $groupsStrict) {
                         PlatformLabel = $platformLabel
                         DiskSort      = $sf.DiskSort
                         SideSort      = $sf.SideSort
+                    }
+                }
+
+                # SAFETY GATE: never hide anything unless the primary exists in gamelist.xml AND
+                # there is at least one secondary entry present in gamelist.xml to hide.
+                $primaryPresent = $false
+                $pathIndex = $null
+                if ($state.Exists -and $null -ne $state.Lines) {
+                    $pathIndex = Get-GamelistPathIndex -Lines $state.Lines
+                } else {
+                    $pathIndex = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($primaryRel) -and $state.Exists -and $null -ne $state.Lines) {
+                    $primaryPresent = $pathIndex.Contains($primaryRel)
+                }
+
+                $secondaryPresentCount = 0
+                if ($state.Exists -and $null -ne $state.Lines) {
+                    foreach ($t in $targets) {
+                        if ([string]::IsNullOrWhiteSpace($t.RelPath)) { continue }
+                        if ($pathIndex.Contains($t.RelPath)) {
+                            $secondaryPresentCount++
+                        }
+                    }
+                }
+
+                if (-not $primaryPresent -or $secondaryPresentCount -lt 1) {
+
+                    # If we can't prove a real multi-entry set exists in gamelist.xml, don't hide.
+                    # Also make sure the would-be secondaries are unhidden (cleanup / safety).
+                    $unhideResult = Unhide-GameEntriesInGamelist -State $state -Targets $targets -UsedFiles $usedFiles
+
+                    $platLabel = $platformRoot.ToUpperInvariant()
+                    if (-not $gamelistUnhiddenCounts.ContainsKey($platLabel)) { $gamelistUnhiddenCounts[$platLabel] = 0 }
+                    if (-not $gamelistAlreadyVisibleCounts.ContainsKey($platLabel)) { $gamelistAlreadyVisibleCounts[$platLabel] = 0 }
+                    $gamelistUnhiddenCounts[$platLabel] += [int]$unhideResult.NewlyUnhiddenCount
+                    $gamelistAlreadyVisibleCounts[$platLabel] += [int]$unhideResult.AlreadyVisibleCount
+
+                    [void]$noM3UPrimaryEntriesIncomplete.Add([PSCustomObject]@{
+                        FullPath = $primaryFull
+                        Reason   = "Skipping hide (primary missing from gamelist.xml or no secondary entries present in gamelist.xml)"
+                    })
+
+                    continue
+                }
+
+                # Track which entries SHOULD be hidden for this NON-M3U platform (Phase 3.5 reconciliation)
+                if (-not $noM3UShouldBeHiddenByPlatform.ContainsKey($platformLower)) {
+                    $noM3UShouldBeHiddenByPlatform[$platformLower] = @{}
+                }
+                foreach ($t in $targets) {
+                    if (-not [string]::IsNullOrWhiteSpace($t.FullPath)) {
+                        $noM3UShouldBeHiddenByPlatform[$platformLower][$t.FullPath] = $t.RelPath
                     }
                 }
 
@@ -1863,6 +1957,111 @@ foreach ($group in $groupsStrict) {
             if (-not $platformCounts.ContainsKey($platformLabel)) { $platformCounts[$platformLabel] = 0 }
             $platformCounts[$platformLabel]++
             $totalPlaylistsCreated++
+        }
+    }
+}
+
+# ==================================================================================================
+# PHASE 3.5: RECONCILIATION PASS (NON-M3U GAMELIST VISIBILITY)
+# ==================================================================================================
+
+# Display reconciliation banner
+Write-Phase "Reconciling NON-M3U gamelist visibility..."
+
+# Only reconcile in XML mode
+if ($noM3UPlatformMode -ieq "XML") {
+
+    # Resolve NON-M3U platform set (lowercase)
+    $noM3USetLower = @($nonM3UPlatforms | ForEach-Object { $_.ToLowerInvariant() })
+
+    foreach ($platformLower in @($noM3UPlatformsEncountered.Keys | Sort-Object -Unique)) {
+
+        if (-not ($noM3USetLower -contains $platformLower.ToLowerInvariant())) { continue }
+
+        $rootPath = Get-PlatformRootPath -ScriptDir $scriptDir -PlatformRootName $platformLower
+        $state = Ensure-GamelistLoaded -PlatformRootLower $platformLower -PlatformRootPath $rootPath
+
+        # Build "should hide" set for this platform (FullPath -> RelPath)
+        $shouldHideMap = @{}
+        if ($noM3UShouldBeHiddenByPlatform.ContainsKey($platformLower)) {
+            $shouldHideMap = $noM3UShouldBeHiddenByPlatform[$platformLower]
+        }
+
+        # Build candidate list: all parsed multi-disk candidates that reside in the PLATFORM ROOT (not subfolders)
+        $candidates = @()
+        foreach ($p in $parsed) {
+
+            $plat = $null
+            try {
+                $plat = Get-PlatformRootName -Directory $p.Directory -ScriptDir $scriptDir
+            } catch {
+                $plat = $null
+            }
+
+            if ($null -eq $plat) { continue }
+            if ($plat.ToLowerInvariant() -ne $platformLower.ToLowerInvariant()) { continue }
+
+            # Only reconcile at the platform root directory (safety)
+            try {
+                $dirFull  = (Resolve-Path -LiteralPath $p.Directory).Path.TrimEnd('\')
+                $rootFull = (Resolve-Path -LiteralPath $rootPath).Path.TrimEnd('\')
+                if ($dirFull -ne $rootFull) { continue }
+            } catch {
+                continue
+            }
+
+            $full = Join-Path $p.Directory $p.FileName
+            $rel  = Get-RelativeGamelistPath -PlatformRootPath $rootPath -FileFullPath $full
+
+            # Only reconcile entries we can map to a gamelist-relative path
+            if ([string]::IsNullOrWhiteSpace($rel)) { continue }
+
+            $candidates += [PSCustomObject]@{
+                FullPath      = $full
+                RelPath       = $rel
+                PlatformLabel = $platformLower.ToUpperInvariant()
+                DiskSort      = $p.DiskSort
+                SideSort      = $p.SideSort
+            }
+        }
+
+        if ($candidates.Count -eq 0) { continue }
+
+        # Partition into "must be hidden" vs "must be visible"
+        $toHide = @()
+        $toUnhide = @()
+
+        foreach ($c in $candidates) {
+
+            $mustHide = $false
+            if ($shouldHideMap.ContainsKey($c.FullPath)) { $mustHide = $true }
+
+            if ($mustHide) { $toHide += $c }
+            else { $toUnhide += $c }
+        }
+
+        # Apply unhide first (safety: never leave stale hidden behind)
+        if ($toUnhide.Count -gt 0) {
+
+            $unhideResult = Unhide-GameEntriesInGamelist -State $state -Targets $toUnhide -UsedFiles $usedFiles
+
+            $platLabel = $platformLower.ToUpperInvariant()
+            if (-not $gamelistUnhiddenCounts.ContainsKey($platLabel)) { $gamelistUnhiddenCounts[$platLabel] = 0 }
+            if (-not $gamelistAlreadyVisibleCounts.ContainsKey($platLabel)) { $gamelistAlreadyVisibleCounts[$platLabel] = 0 }
+            $gamelistUnhiddenCounts[$platLabel] += [int]$unhideResult.NewlyUnhiddenCount
+            $gamelistAlreadyVisibleCounts[$platLabel] += [int]$unhideResult.AlreadyVisibleCount
+        }
+
+        # Apply hide for entries that are still expected to be hidden
+        if ($toHide.Count -gt 0) {
+
+            $hideResult = Hide-GameEntriesInGamelist -State $state -Targets $toHide -UsedFiles $usedFiles
+
+            $platLabel = $platformLower.ToUpperInvariant()
+            if (-not $gamelistHiddenCounts.ContainsKey($platLabel)) { $gamelistHiddenCounts[$platLabel] = 0 }
+            if (-not $gamelistAlreadyHiddenCounts.ContainsKey($platLabel)) { $gamelistAlreadyHiddenCounts[$platLabel] = 0 }
+            $gamelistHiddenCounts[$platLabel] += [int]$hideResult.NewlyHiddenCount
+            $gamelistAlreadyHiddenCounts[$platLabel] += [int]$hideResult.AlreadyHiddenCount
         }
     }
 }
