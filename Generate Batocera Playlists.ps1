@@ -1,6 +1,6 @@
 <#
 PURPOSE: Create .m3u files for each multi-disk game and insert the list of game filenames into the playlist or update gamelist.xml
-VERSION: 1.6
+VERSION: 1.7
 AUTHOR: Devin Kelley, Distant Thunderworks LLC
 
 NOTES:
@@ -22,6 +22,8 @@ BREAKDOWN
     - Skips common media/manual folders (e.g., images, videos, media, manuals, downloaded_*) to reduce false multi-disk detections
     - For platforms that can't use M3U playlist files, the script instead hides Disk 2+ in gamelist.xml (<hidden>true</hidden>)
         - Per run, a backup of gamelist.xml is made first called gamelist.backup, labeled with (1), (2), etc. if a backup already exists.
+        - If a platform is added into $nonM3UPlatforms, the script will also delete any existing .m3u files under that platform (respecting $dryRun).
+        - If a platform is removed from $nonM3UPlatforms (becoming M3U again), the script will unhide only the Disk 2+ entries it previously hid (tracked via a custom marker tag).
         - This creates a single entry in Batocera for a multi-disk game (for the first disk in the set) instead of one for each disk
         - Initially, this includes 3DO and Apple II but additional platform folders can be added into the $nonM3UPlatforms array
         - Ensures the canonical <name> exists across Disk 2+ entries
@@ -103,54 +105,54 @@ BREAKDOWN
 # PHASE 0: SCRIPT STARTUP / CONFIG / STATE
 # ==================================================================================================
 
-# [PHASE 0] Establish script working directory and start time
+# Establish script working directory and start time
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $scriptStart = Get-Date
 
-# [PHASE 0] Initialize platform playlist count buckets and total counter
+# Initialize platform playlist count buckets and total counter
 $platformCounts = @{}
 $totalPlaylistsCreated = 0
 
-# [PHASE 0] User config: dry run toggle
+# User config: dry run toggle
 $dryRun = $false # <-- set to $true if you want to see what the output would be without changing files
 
-# [PHASE 0] User config: platforms that should not use M3U playlists
+# User config: platforms that should not use M3U playlists
 $nonM3UPlatforms = @(
     '3DO'
     'apple2'
 )
 
-# [PHASE 0] User config: NON-M3U platform handling mode
+# User config: NON-M3U platform handling mode
 $noM3UPlatformMode = "XML"   # <-- set to "skip" to completely ignore those platforms
 
-# [PHASE 0] Attempt to widen console buffer (best-effort)
+# Attempt to widen console buffer (best-effort)
 try {
     $raw = $Host.UI.RawUI
     $size = $raw.BufferSize
-    # [PHASE 0] If buffer width is narrow, expand it
+    # If buffer width is narrow, expand it
     if ($size.Width -lt 300) {
         $raw.BufferSize = New-Object Management.Automation.Host.Size(300, $size.Height)
     }
 } catch {
-    # [PHASE 0] Ignore console resize failures
+    # Ignore console resize failures
 }
 
-# [PHASE 0] Declare folder names that should not be scanned
+# Declare folder names that should not be scanned
 $skipFolders = @(
     'images','videos','media','manuals',
     'downloaded_images','downloaded_videos','downloaded_media','downloaded_manuals'
 )
 
-# [PHASE 0] Initialize cached gamelist state per platform
+# Initialize cached gamelist state per platform
 $gamelistStateByPlatform = @{}     # platformLower -> state object (cached lines)
 
-# [PHASE 0] Initialize per-run gamelist backup tracking
+# Initialize per-run gamelist backup tracking
 $gamelistBackupDone      = @{}     # gamelist path -> $true
 
-# [PHASE 0] Initialize a lookup of "missing from gamelist.xml" by full ROM path
+# Initialize a lookup of "missing from gamelist.xml" by full ROM path
 $noM3UMissingGamelistEntryByFullPath = @{}  # full file path -> $true
 
-# [PHASE 0] Initialize NON-M3U reporting buckets (ArrayList for safety)
+# Initialize NON-M3U reporting buckets (ArrayList for safety)
 $noM3UPrimaryEntriesOk         = [System.Collections.ArrayList]::new() # PSCustomObject { FullPath; Reason }
 $noM3UPrimaryEntriesIncomplete = [System.Collections.ArrayList]::new() # PSCustomObject { FullPath; Reason }
 $noM3UNoDisk1Sets              = [System.Collections.ArrayList]::new() # PSCustomObject { FullPath; Reason }
@@ -165,19 +167,33 @@ $noM3UAlreadyVisibleSet        = [System.Collections.Generic.HashSet[string]]::n
 
 $noM3UMissingGamelistEntries   = [System.Collections.ArrayList]::new() # PSCustomObject { FullPath; Reason }
 
-# [PHASE 0] Initialize per-platform count buckets for gamelist changes
+# Initialize per-platform count buckets for gamelist changes
 $gamelistHiddenCounts          = @{}  # platform label -> count newly hidden
 $gamelistAlreadyHiddenCounts   = @{}  # platform label -> count already hidden (no change)
 
 $gamelistUnhiddenCounts        = @{}  # platform label -> count newly unhidden
 $gamelistAlreadyVisibleCounts  = @{}  # platform label -> count already visible (no change)
 
-# [PHASE 0] Track NON-M3U entries that SHOULD be hidden per platform (for Phase 3.5 reconciliation)
+# Track NON-M3U entries that SHOULD be hidden per platform
 $noM3UShouldBeHiddenByPlatform = @{}  # platformLower -> hashtable fullPath -> relPath
 $noM3UPlatformsEncountered     = @{}  # platformLower -> $true
 
+# Marker tag used to track which hidden entries were hidden by THIS script (for safe reclassification unhide)
+$dtwNonM3UMarkerTagName = "dtw_nonm3u_hidden"
+$dtwNonM3UMarkerLine    = "<$dtwNonM3UMarkerTagName>true</$dtwNonM3UMarkerTagName>"
+
+# Reporting: marker tag operations (retro-tag + cleanup/unhide)
+$noM3UMarkerNewlyAdded   = [System.Collections.ArrayList]::new() # PSCustomObject { FullPath; Reason }
+$noM3UMarkerRemoved      = [System.Collections.ArrayList]::new() # PSCustomObject { FullPath; Reason }
+$noM3UMarkerAddedSet     = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$noM3UMarkerRemovedSet   = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+# Reporting: M3U deletion when platform is NON-M3U
+$nonM3UDeletedM3UFiles    = [System.Collections.ArrayList]::new() # PSCustomObject { FullPath; Reason }
+$nonM3UDeletedM3UCounts   = @{}  # platform label -> count deleted
+
 # ==================================================================================================
-# PHASE 0.5: FUNCTIONS
+# FUNCTIONS
 # ==================================================================================================
 
 # Normalize an M3U payload into a stable line array
@@ -625,6 +641,166 @@ function Is-InSkipFolderPath {
     return $false
 }
 
+# Delete all .m3u files under a NON-M3U platform root (respecting $dryRun)
+function Delete-M3UFilesUnderPlatformRoot {
+    param(
+        [Parameter(Mandatory=$true)][string]$PlatformLabel,
+        [Parameter(Mandatory=$true)][string]$PlatformRootPath
+    )
+
+    if (-not (Test-Path -LiteralPath $PlatformRootPath)) { return 0 }
+
+    $deletedCount = 0
+
+    # Match script scan depth and skip folders
+    $m3us = @()
+    try {
+        $m3us = @(Get-ChildItem -LiteralPath $PlatformRootPath -File -Recurse -Depth 2 -Filter "*.m3u" -ErrorAction SilentlyContinue)
+    } catch {
+        $m3us = @()
+    }
+
+    foreach ($f in $m3us) {
+
+        # Safety: don't delete anything inside known media/manual folders
+        if (Is-InSkipFolderPath -FileFullPath $f.FullName -SkipFolderNames $skipFolders) { continue }
+
+        if ($dryRun) {
+            [void]$nonM3UDeletedM3UFiles.Add([PSCustomObject]@{
+                FullPath = $f.FullName
+                Reason   = "DRY RUN (would delete .m3u because platform is NON-M3U)"
+            })
+            $deletedCount++
+            continue
+        }
+
+        try {
+            Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop
+            [void]$nonM3UDeletedM3UFiles.Add([PSCustomObject]@{
+                FullPath = $f.FullName
+                Reason   = "Deleted .m3u because platform is NON-M3U"
+            })
+            $deletedCount++
+        } catch {
+            # If delete fails, still report it (but do not count as deleted)
+            [void]$nonM3UDeletedM3UFiles.Add([PSCustomObject]@{
+                FullPath = $f.FullName
+                Reason   = "FAILED to delete .m3u (platform is NON-M3U): $($_.Exception.Message)"
+            })
+        }
+    }
+
+    if (-not $nonM3UDeletedM3UCounts.ContainsKey($PlatformLabel)) { $nonM3UDeletedM3UCounts[$PlatformLabel] = 0 }
+    $nonM3UDeletedM3UCounts[$PlatformLabel] += [int]$deletedCount
+
+    return $deletedCount
+}
+
+# Unhide ONLY entries that are marked as hidden by this script (marker tag) for a platform now treated as M3U
+function Unhide-MarkedEntriesInPlatformGamelist {
+    param(
+        [Parameter(Mandatory=$true)]$State,
+        [Parameter(Mandatory=$true)][string]$PlatformLabel,
+        [Parameter(Mandatory=$true)][hashtable]$UsedFiles
+    )
+
+    $result = [PSCustomObject]@{
+        DidWork            = $false
+        NewlyUnhiddenCount = 0
+        MarkerRemovedCount = 0
+    }
+
+    if (-not $State.Exists -or $null -eq $State.Lines) { return $result }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($ln in $State.Lines) { [void]$lines.Add($ln) }
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+
+        $line = $lines[$i]
+        if ($null -eq $line) { continue }
+
+        $m = [regex]::Match($line, '^(?<I>\s*)<path>\s*(?<V>.*?)\s*</path>\s*$')
+        if (-not $m.Success) { continue }
+
+        $indent = $m.Groups['I'].Value
+        $rel = $m.Groups['V'].Value
+
+        # Walk this <game> block
+        $j = $i + 1
+        $endIndex = $null
+        $hiddenIndex = $null
+        $hiddenValue = $null
+        $markerIndex = $null
+
+        while ($j -lt $lines.Count) {
+
+            $tline = $lines[$j]
+            if ($tline -match '^\s*<path>\s*') { break }
+            if ($tline -match '^\s*</game>\s*$') { $endIndex = $j; break }
+
+            if ($null -eq $hiddenIndex) {
+                $hm = [regex]::Match($tline, '^\s*<hidden>\s*(?<H>.*?)\s*</hidden>\s*$')
+                if ($hm.Success) { $hiddenIndex = $j; $hiddenValue = $hm.Groups['H'].Value }
+            }
+
+            if ($null -eq $markerIndex) {
+                $mm = [regex]::Match($tline, '^\s*<' + [regex]::Escape($dtwNonM3UMarkerTagName) + '>\s*(?<M>.*?)\s*</' + [regex]::Escape($dtwNonM3UMarkerTagName) + '>\s*$')
+                if ($mm.Success) { $markerIndex = $j }
+            }
+
+            $j++
+        }
+
+        # Only act if marker exists
+        if ($null -eq $markerIndex) { continue }
+
+        # Remove marker line always (cleanup)
+        if (-not $dryRun) {
+            $lines.RemoveAt($markerIndex)
+            $State.Changed = $true
+        }
+        $result.DidWork = $true
+        $result.MarkerRemovedCount++
+
+        # Report marker removal (micro-dedupe by rel path where possible)
+        if ($noM3UMarkerRemovedSet.Add([string]$rel)) {
+            [void]$noM3UMarkerRemoved.Add([PSCustomObject]@{
+                FullPath = $rel
+                Reason   = "Removed NON-M3U marker because platform is now treated as M3U"
+            })
+        }
+
+        # If marker was before hidden line, hidden index shifts left by 1 after removal
+        if ($null -ne $hiddenIndex -and $markerIndex -lt $hiddenIndex) { $hiddenIndex-- }
+
+        # If hidden=true exists, remove it (unhide)
+        if ($null -ne $hiddenIndex -and $hiddenValue -match '^(?i)true$') {
+
+            if (-not $dryRun) {
+                $lines.RemoveAt($hiddenIndex)
+                $State.Changed = $true
+            }
+            $result.DidWork = $true
+            $result.NewlyUnhiddenCount++
+
+            # We only have a rel path here; still mark "used" defensively as rel path
+            $UsedFiles[$rel] = $true
+
+            [void]$noM3UNewlyUnhidden.Add([PSCustomObject]@{
+                FullPath = $rel
+                Reason   = "Unhidden because platform is now treated as M3U (marker-based)"
+            })
+        }
+
+        # Continue scan safely: rewind slightly (block mutations)
+        if ($i -gt 0) { $i-- }
+    }
+
+    $State.Lines = $lines.ToArray()
+    return $result
+}
+
 # Ensure <name> appears above <hidden> within the same <game> block for a given <path> line index
 function Ensure-NameBeforeHiddenInGameBlock {
     param(
@@ -699,7 +875,7 @@ function Ensure-GameNamesInGamelist {
     # Skip if gamelist isn't loaded
     if (-not $State.Exists -or $null -eq $State.Lines) { return $false }
 
-    # ---- SMART IMPROVEMENT (B): use List[string] for efficient inserts/edits ----
+    # ---- Use List[string] for efficient inserts/edits ----
     $lines = [System.Collections.Generic.List[string]]::new()
     foreach ($ln in $State.Lines) { [void]$lines.Add($ln) }
     # ---------------------------------------------------------------------------
@@ -725,7 +901,7 @@ function Ensure-GameNamesInGamelist {
     foreach ($t in $Targets) {
         if ([string]::IsNullOrWhiteSpace($t.RelPath)) { $allMatch = $false; break }
         $nm = Get-GamelistNameByRelPath -Lines $lines -RelPath $t.RelPath
-        # ---- SMART IMPROVEMENT (A): explicitly treat missing name as mismatch ----
+        # ---- Explicitly treat missing name as mismatch ----
         if ($null -eq $nm -or $nm -ne $canonical) { $allMatch = $false; break }
         # -----------------------------------------------------------------------
     }
@@ -860,7 +1036,7 @@ function Hide-GameEntriesInGamelist {
         return $result
     }
 
-    # ---- SMART IMPROVEMENT (B): use List[string] for efficient inserts/edits ----
+    # ---- Use List[string] for efficient inserts/edits ----
     $lines = [System.Collections.Generic.List[string]]::new()
     foreach ($ln in $State.Lines) { [void]$lines.Add($ln) }
     # ---------------------------------------------------------------------------
@@ -900,10 +1076,11 @@ function Hide-GameEntriesInGamelist {
             $found = $true
             $indent = $m.Groups['I'].Value
 
-            # Walk within this <game> block to find existing <hidden>
+            # Walk within this <game> block to find existing <hidden> and DTW marker
             $j = $i + 1
             $hiddenLineIndex = $null
             $hiddenValue = $null
+            $markerLineIndex = $null
 
             while ($j -lt $lines.Count) {
                 $tline = $lines[$j]
@@ -911,12 +1088,24 @@ function Hide-GameEntriesInGamelist {
                 if ($tline -match '^\s*<path>\s*') { break }
                 if ($tline -match '^\s*</game>\s*$') { break }
 
-                $hm = [regex]::Match($tline, '^\s*<hidden>\s*(?<H>.*?)\s*</hidden>\s*$')
-                if ($hm.Success) {
-                    $hiddenLineIndex = $j
-                    $hiddenValue = $hm.Groups['H'].Value
-                    break
+                if ($null -eq $hiddenLineIndex) {
+                    $hm = [regex]::Match($tline, '^\s*<hidden>\s*(?<H>.*?)\s*</hidden>\s*$')
+                    if ($hm.Success) {
+                        $hiddenLineIndex = $j
+                        $hiddenValue = $hm.Groups['H'].Value
+                    }
                 }
+
+                if ($null -eq $markerLineIndex) {
+                    $mm = [regex]::Match(
+                        $tline,
+                        '^\s*<' + [regex]::Escape($dtwNonM3UMarkerTagName) + '>\s*(?<M>.*?)\s*</' + [regex]::Escape($dtwNonM3UMarkerTagName) + '>\s*$'
+                    )
+                    if ($mm.Success) { $markerLineIndex = $j }
+                }
+
+                if ($null -ne $hiddenLineIndex -and $null -ne $markerLineIndex) { break }
+
                 $j++
             }
 
@@ -925,6 +1114,24 @@ function Hide-GameEntriesInGamelist {
 
                 if ($hiddenValue -match '^(?i)true$') {
                     $UsedFiles[$t.FullPath] = $true
+
+                    # Retro-tag: if already hidden but marker is missing, add marker so reclassification can safely unhide later
+                    if ($null -eq $markerLineIndex) {
+                        if (-not $dryRun) {
+                            # Insert marker immediately after <hidden> line
+                            $lines.Insert($hiddenLineIndex + 1, ($indent + $dtwNonM3UMarkerLine))
+                            $State.Changed = $true
+                        }
+
+                        $result.DidWork = $true
+
+                        if ($noM3UMarkerAddedSet.Add([string]$t.FullPath)) {
+                            [void]$noM3UMarkerNewlyAdded.Add([PSCustomObject]@{
+                                FullPath = $t.FullPath
+                                Reason   = "Added NON-M3U marker to an already-hidden entry (retro-tag for safe reclassification)"
+                            })
+                        }
+                    }
 
                     if (-not $SuppressAlreadyReport) {
 
@@ -944,8 +1151,8 @@ function Hide-GameEntriesInGamelist {
                         if (-not $dryRun) {
                             $lines.Clear()
                             foreach ($ln in $tmpArr) { [void]$lines.Add($ln) }
+                            $State.Changed = $true
                         }
-                        $State.Changed = $true
                         $result.DidWork = $true
                     }
 
@@ -954,8 +1161,24 @@ function Hide-GameEntriesInGamelist {
                 else {
                     if (-not $dryRun) {
                         $lines[$hiddenLineIndex] = ($lines[$hiddenLineIndex] -replace '(?i)<hidden>\s*.*?\s*</hidden>', '<hidden>true</hidden>')
+                        $State.Changed = $true
                     }
-                    $State.Changed = $true
+
+                    # Ensure marker exists when we hide
+                    if ($null -eq $markerLineIndex) {
+                        if (-not $dryRun) {
+                            $lines.Insert($hiddenLineIndex + 1, ($indent + $dtwNonM3UMarkerLine))
+                            $State.Changed = $true
+                        }
+
+                        if ($noM3UMarkerAddedSet.Add([string]$t.FullPath)) {
+                            [void]$noM3UMarkerNewlyAdded.Add([PSCustomObject]@{
+                                FullPath = $t.FullPath
+                                Reason   = "Added NON-M3U marker (entry hidden by this script)"
+                            })
+                        }
+                    }
+
                     $result.DidWork = $true
                     $result.NewlyHiddenCount++
                     $UsedFiles[$t.FullPath] = $true
@@ -970,8 +1193,8 @@ function Hide-GameEntriesInGamelist {
                         if (-not $dryRun) {
                             $lines.Clear()
                             foreach ($ln in $tmpArr) { [void]$lines.Add($ln) }
+                            $State.Changed = $true
                         }
-                        $State.Changed = $true
                         $result.DidWork = $true
                     }
 
@@ -983,9 +1206,20 @@ function Hide-GameEntriesInGamelist {
                 if (-not $dryRun) {
                     $insertLine = ($indent + "<hidden>true</hidden>")
                     $lines.Insert($i + 1, $insertLine)
+
+                    # Insert marker immediately after <hidden>
+                    $lines.Insert($i + 2, ($indent + $dtwNonM3UMarkerLine))
+
+                    $State.Changed = $true
                 }
 
-                $State.Changed = $true
+                if ($noM3UMarkerAddedSet.Add([string]$t.FullPath)) {
+                    [void]$noM3UMarkerNewlyAdded.Add([PSCustomObject]@{
+                        FullPath = $t.FullPath
+                        Reason   = "Added NON-M3U marker (entry hidden by this script)"
+                    })
+                }
+
                 $result.DidWork = $true
                 $result.NewlyHiddenCount++
                 $UsedFiles[$t.FullPath] = $true
@@ -1000,8 +1234,8 @@ function Hide-GameEntriesInGamelist {
                     if (-not $dryRun) {
                         $lines.Clear()
                         foreach ($ln in $tmpArr) { [void]$lines.Add($ln) }
+                        $State.Changed = $true
                     }
-                    $State.Changed = $true
                     $result.DidWork = $true
                 }
 
@@ -1058,7 +1292,7 @@ function Unhide-GameEntriesInGamelist {
         return $result
     }
 
-    # ---- SMART IMPROVEMENT (B): use List[string] for efficient deletes/edits ----
+    # ---- Use List[string] for efficient deletes/edits ----
     $lines = [System.Collections.Generic.List[string]]::new()
     foreach ($ln in $State.Lines) { [void]$lines.Add($ln) }
     # ---------------------------------------------------------------------------
@@ -1103,15 +1337,16 @@ function Unhide-GameEntriesInGamelist {
                 if (-not $dryRun) {
                     $lines.Clear()
                     foreach ($ln in $tmpArr) { [void]$lines.Add($ln) }
+                    $State.Changed = $true
                 }
-                $State.Changed = $true
                 $result.DidWork = $true
             }
 
-            # Walk within this <game> block to find existing <hidden>
+            # Walk within this <game> block to find existing <hidden> and DTW marker
             $j = $i + 1
             $hiddenLineIndex = $null
             $hiddenValue = $null
+            $markerLineIndex = $null
 
             while ($j -lt $lines.Count) {
                 $tline = $lines[$j]
@@ -1119,12 +1354,23 @@ function Unhide-GameEntriesInGamelist {
                 if ($tline -match '^\s*<path>\s*') { break }
                 if ($tline -match '^\s*</game>\s*$') { break }
 
-                $hm = [regex]::Match($tline, '^\s*<hidden>\s*(?<H>.*?)\s*</hidden>\s*$')
-                if ($hm.Success) {
-                    $hiddenLineIndex = $j
-                    $hiddenValue = $hm.Groups['H'].Value
-                    break
+                if ($null -eq $hiddenLineIndex) {
+                    $hm = [regex]::Match($tline, '^\s*<hidden>\s*(?<H>.*?)\s*</hidden>\s*$')
+                    if ($hm.Success) {
+                        $hiddenLineIndex = $j
+                        $hiddenValue = $hm.Groups['H'].Value
+                    }
                 }
+
+                if ($null -eq $markerLineIndex) {
+                    $mm = [regex]::Match(
+                        $tline,
+                        '^\s*<' + [regex]::Escape($dtwNonM3UMarkerTagName) + '>\s*(?<M>.*?)\s*</' + [regex]::Escape($dtwNonM3UMarkerTagName) + '>\s*$'
+                    )
+                    if ($mm.Success) { $markerLineIndex = $j }
+                }
+
+                if ($null -ne $hiddenLineIndex -and $null -ne $markerLineIndex) { break }
 
                 $j++
             }
@@ -1132,11 +1378,31 @@ function Unhide-GameEntriesInGamelist {
             # If hidden=true, remove that line; else record already visible
             if ($null -ne $hiddenLineIndex -and $hiddenValue -match '^(?i)true$') {
 
+                # Remove <hidden>true</hidden>
                 if (-not $dryRun) {
                     $lines.RemoveAt($hiddenLineIndex)
+                    $State.Changed = $true
                 }
 
-                $State.Changed = $true
+                # Also remove marker if present (cleanup)
+                if ($null -ne $markerLineIndex) {
+
+                    # If marker was after hidden, its index shifts by -1 after removing hidden
+                    if ($markerLineIndex -gt $hiddenLineIndex) { $markerLineIndex-- }
+
+                    if (-not $dryRun) {
+                        $lines.RemoveAt($markerLineIndex)
+                        $State.Changed = $true
+                    }
+
+                    if ($noM3UMarkerRemovedSet.Add([string]$t.FullPath)) {
+                        [void]$noM3UMarkerRemoved.Add([PSCustomObject]@{
+                            FullPath = $t.FullPath
+                            Reason   = "Removed NON-M3U marker (entry unhidden)"
+                        })
+                    }
+                }
+
                 $result.DidWork = $true
                 $result.NewlyUnhiddenCount++
                 $UsedFiles[$t.FullPath] = $true
@@ -1152,6 +1418,24 @@ function Unhide-GameEntriesInGamelist {
             else {
 
                 $UsedFiles[$t.FullPath] = $true
+
+                # Cleanup: if marker exists but entry is not hidden, remove marker
+                if ($null -ne $markerLineIndex) {
+
+                    if (-not $dryRun) {
+                        $lines.RemoveAt($markerLineIndex)
+                        $State.Changed = $true
+                    }
+
+                    $result.DidWork = $true
+
+                    if ($noM3UMarkerRemovedSet.Add([string]$t.FullPath)) {
+                        [void]$noM3UMarkerRemoved.Add([PSCustomObject]@{
+                            FullPath = $t.FullPath
+                            Reason   = "Removed NON-M3U marker from an already-visible entry (cleanup)"
+                        })
+                    }
+                }
 
                 if (-not $SuppressAlreadyReport) {
 
@@ -1329,6 +1613,32 @@ $parsed = @()
 
 # Display scan banner
 Write-Phase "Collecting ROM file data (scanning folders)..."
+
+# If in XML mode, delete existing .m3u files for platforms currently designated NON-M3U (respect $dryRun)
+if ($noM3UPlatformMode -ieq "XML") {
+
+    $scriptFull = (Resolve-Path -LiteralPath $scriptDir).Path.TrimEnd('\')
+    $scriptLeaf = (Split-Path -Leaf $scriptFull)
+    $scriptIsRomsRoot = ($scriptLeaf -match '^(?i)roms$')
+
+    # Determine which NON-M3U platforms are in-scope for this run
+    $scopeNoM3U = @()
+    if ($scriptIsRomsRoot) {
+        $scopeNoM3U = @($nonM3UPlatforms | ForEach-Object { $_.ToLowerInvariant() })
+    } else {
+        $scopeNoM3U = @($scriptLeaf.ToLowerInvariant())
+    }
+
+    foreach ($p in @($nonM3UPlatforms | ForEach-Object { $_.ToLowerInvariant() })) {
+
+        if (-not ($scopeNoM3U -contains $p)) { continue }
+
+        $rootPath = Get-PlatformRootPath -ScriptDir $scriptDir -PlatformRootName $p
+        $platLabel = $p.ToUpperInvariant()
+
+        Delete-M3UFilesUnderPlatformRoot -PlatformLabel $platLabel -PlatformRootPath $rootPath | Out-Null
+    }
+}
 
 # Enumerate candidate ROM files and parse disk/side patterns
 Get-ChildItem -Path $scriptDir -File -Recurse -Depth 2 | ForEach-Object {
@@ -1568,7 +1878,7 @@ foreach ($group in $groupsStrict) {
             # Respect "skip" mode for NON-M3U platforms
             if ($isNoM3U -and $noM3UPlatformMode -ieq "skip") { continue }
 
-            # Track encountered NON-M3U platforms for Phase 3.5
+            # Track encountered NON-M3U platforms
             if ($isNoM3U -and $null -ne $platformRoot) {
                 $noM3UPlatformsEncountered[$platformRoot.ToLowerInvariant()] = $true
             }
@@ -1913,7 +2223,7 @@ foreach ($group in $groupsStrict) {
                     continue
                 }
 
-                # Track which entries SHOULD be hidden for this NON-M3U platform (Phase 3.5 reconciliation)
+                # Track which entries SHOULD be hidden for this NON-M3U platform
                 if (-not $noM3UShouldBeHiddenByPlatform.ContainsKey($platformLower)) {
                     $noM3UShouldBeHiddenByPlatform[$platformLower] = @{}
                 }
@@ -1981,7 +2291,7 @@ foreach ($group in $groupsStrict) {
 }
 
 # ==================================================================================================
-# PHASE 3.5: RECONCILIATION PASS (NON-M3U GAMELIST VISIBILITY)
+# RECONCILIATION PASS (NON-M3U GAMELIST VISIBILITY)
 # ==================================================================================================
 
 # Display reconciliation banner
@@ -2086,6 +2396,55 @@ if ($noM3UPlatformMode -ieq "XML") {
 }
 
 # ==================================================================================================
+# RECLASSIFICATION SWEEP (M3U PLATFORMS: UNHIDE ONLY MARKED ENTRIES)
+# ==================================================================================================
+
+Write-Phase "Reconciling M3U reclassification (unhiding only entries previously hidden by this script)..."
+
+if ($noM3UPlatformMode -ieq "XML") {
+
+    # Resolve NON-M3U platform set (lowercase)
+    $noM3USetLower = @($nonM3UPlatforms | ForEach-Object { $_.ToLowerInvariant() })
+
+    $scriptFull = (Resolve-Path -LiteralPath $scriptDir).Path.TrimEnd('\')
+    $scriptLeaf = (Split-Path -Leaf $scriptFull)
+    $scriptIsRomsRoot = ($scriptLeaf -match '^(?i)roms$')
+
+    # Determine platforms in scope
+    $platformsToCheck = @()
+    if ($scriptIsRomsRoot) {
+        # Check every platform folder that actually exists under ROMs
+        try {
+            $platformsToCheck = @(Get-ChildItem -LiteralPath $scriptDir -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name.ToLowerInvariant() })
+        } catch {
+            $platformsToCheck = @()
+        }
+    } else {
+        $platformsToCheck = @($scriptLeaf.ToLowerInvariant())
+    }
+
+    foreach ($platformLower in @($platformsToCheck | Sort-Object -Unique)) {
+
+        # Only sweep platforms that are CURRENTLY treated as M3U (i.e., not in NON-M3U list)
+        if ($noM3USetLower -contains $platformLower) { continue }
+
+        $rootPath = Get-PlatformRootPath -ScriptDir $scriptDir -PlatformRootName $platformLower
+        $state = Ensure-GamelistLoaded -PlatformRootLower $platformLower -PlatformRootPath $rootPath
+
+        if (-not $state.Exists -or $null -eq $state.Lines) { continue }
+
+        $platLabel = $platformLower.ToUpperInvariant()
+        $sweep = Unhide-MarkedEntriesInPlatformGamelist -State $state -PlatformLabel $platLabel -UsedFiles $usedFiles
+
+        # Count these under the existing unhidden buckets (they will show as rel paths)
+        if (-not $gamelistUnhiddenCounts.ContainsKey($platLabel)) { $gamelistUnhiddenCounts[$platLabel] = 0 }
+        $gamelistUnhiddenCounts[$platLabel] += [int]$sweep.NewlyUnhiddenCount
+
+        # Marker removals are reported via $noM3UMarkerRemoved
+    }
+}
+
+# ==================================================================================================
 # PHASE 4: FLUSH GAMELIST CHANGES (NON-M3U PLATFORMS)
 # ==================================================================================================
 
@@ -2134,6 +2493,18 @@ if (-not $anyM3UActivity -and -not $anyGamelistActivity) {
 
     Write-Host ""
     Write-Host "M3U PLAYLISTS" -ForegroundColor Green
+
+    # Report deleted M3U playlists for platforms configured as NON-M3U
+    if ($null -ne $nonM3UDeletedM3UFiles -and @($nonM3UDeletedM3UFiles).Count -gt 0) {
+
+        Write-Host ""
+        Write-Host "DELETED (PLATFORM CONFIGURED AS NON-M3U)" -ForegroundColor Green
+
+        $nonM3UDeletedM3UFiles | Sort-Object FullPath | ForEach-Object {
+            Write-Host "$($_.FullPath)" -NoNewline
+            Write-Host " — $($_.Reason)" -ForegroundColor Yellow
+        }
+    }
 
     # List created M3U playlists (and overwrite markers)
     if (@($m3uWrittenPlaylistPaths.Keys).Count -gt 0) {
