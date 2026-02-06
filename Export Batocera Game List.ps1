@@ -12,8 +12,11 @@ NOTES:
     - If "Game List.csv" already exists in the output folder, it is deleted and replaced with a newly generated file.
 
 IMPORTANT NOTE:
-- For non-M3U multi-disk games, they must each have the same name in gamelist.xml, as this is what's used by the script to group them
+- For non-M3U multi-disk games, all disks should share the same <name> in gamelist.xml, used by the script to group them
     - Generate Batocera Playlists.ps1 does attempt to do this by populating <name> in gamelist.xml, but this note is here for awareness
+        - While the script also uses filename disk designators and normalization heuristics, <name> is the most reliable grouping key
+        - The script attempts to enforce this by propagating Disk 1’s <name> to Disk 2+ entries
+            - This note is included for awareness when working with manually edited or legacy gamelists
     - In the example below, a game with three disks/filenames/paths are all part of the same game with the same name:
 
         <path>./Game ROM Image (Disk 1).chd</path>
