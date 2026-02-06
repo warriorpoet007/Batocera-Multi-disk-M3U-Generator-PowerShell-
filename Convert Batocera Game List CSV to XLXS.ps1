@@ -87,7 +87,7 @@ function Write-RuntimeReport {
     try {
         if ($Stop -and $__runtimeStopwatch.IsRunning) { $__runtimeStopwatch.Stop() }
         $rt = Format-ElapsedRuntime -Elapsed $__runtimeStopwatch.Elapsed
-        Write-Host ("Runtime: {0}" -f $rt) -ForegroundColor DarkGray
+        Write-Host ("Runtime: {0}" -f $rt) -ForegroundColor DarkYellow
     } catch {
         # Intentionally ignore runtime reporting failures
     }
