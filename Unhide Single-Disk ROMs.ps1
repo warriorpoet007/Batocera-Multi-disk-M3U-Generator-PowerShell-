@@ -1,4 +1,4 @@
-﻿<#
+<#
 PURPOSE: Review and optionally unhide single-disk hidden entries in Batocera gamelist.xml files
 VERSION: 1.0
 AUTHOR: Devin Kelley, Distant Thunderworks LLC
@@ -6,36 +6,35 @@ AUTHOR: Devin Kelley, Distant Thunderworks LLC
 NOTES:
 - Place this file into the ROMS folder to process multiple platforms, OR into a platform's individual folder to process just that one.
 - This script DOES modify gamelist.xml when you choose to unhide entries.
-- It searches for entries marked hidden via: <hidden>true</hidden> (also accepts 1/yes, case-insensitive).
-- For each hidden entry found, it prompts you to:
-    - Unhide (remove the <hidden> node entirely)
-    - Skip (leave hidden)
-    - Cancel (abort the script safely; any changes already saved remain saved)
 
-IMPORTANT MULTI-DISK SAFETY (robust bypass):
+BREAKDOWN:
+- Searches for entries marked hidden via: <hidden>true</hidden> (also accepts 1/yes, case-insensitive).
+    - For each hidden entry found, it prompts you to:
+        - Unhide (remove the <hidden> node entirely)
+        - Skip (leave hidden)
+        - Cancel (abort the script safely; any changes already saved remain saved)
+
 - Hidden entries that appear to be "Disk 2+" (or equivalent) members of a multi-disk set are automatically BYPASSED.
-- This is done via stable grouping logic consistent with the Export Game List methodology:
-    - GroupKey primary: <name> when present
-    - GroupKey fallback: <path> when <name> is missing/blank
+    - This is done via stable grouping logic consistent with the Export Game List methodology:
+        - GroupKey primary: <name> when present
+        - GroupKey fallback: <path> when <name> is missing/blank
+
 - Within each group, a single "primary candidate" is chosen (Disk 1 / representative).
   Only that primary candidate is eligible for prompting if it is hidden.
   All other hidden siblings in the same group are treated as Disk 2+ and remain hidden (no prompt).
 
-ROBUSTNESS:
 - If a gamelist.xml is malformed and cannot be parsed as XML, the script will skip it (safe behavior; no edits).
+
 - Before saving any edits for a given gamelist.xml, the script creates a timestamped .bak backup next to the file.
 
-DISCOVERY / SCOPE:
 - Determines runtime mode based on where the script is located:
     - If a gamelist.xml exists in the script directory, treat it as a single-platform run.
-    - Otherwise, treat the script directory as ROMS root and scan up to 2 folder levels deep for gamelist.xml files.
-- In ROMS root mode, prints per-platform start + finished lines.
-- Always prints a final summary and runtime.
+        - Otherwise, treat the script directory as ROMS root and scan up to 2 folder levels deep for gamelist.xml files.
+    - In ROMS root mode, prints per-platform start + finished lines.
 
-UI:
 - Uses a top-most WinForms MessageBox (Yes/No/Cancel) when running in STA + WinForms available.
-- Falls back to console prompts otherwise.
-
+    - If this box appears behind the the PowerShell/PowerShell ISE window, ALT-TAB to it
+    - Falls back to console prompts otherwise.
 #>
 
 # ==================================================================================================
@@ -86,7 +85,7 @@ function Write-RuntimeReport {
   try {
     if ($Stop -and $__runtimeStopwatch.IsRunning) { $__runtimeStopwatch.Stop() }
     $rt = Format-ElapsedRuntime -Elapsed $__runtimeStopwatch.Elapsed
-    Write-Host ("Runtime: {0}" -f $rt) -ForegroundColor Gray
+    Write-Host ("Runtime: {0}" -f $rt) -ForegroundColor DarkYellow
   } catch {
     # Intentionally ignore runtime reporting failures
   }
@@ -468,7 +467,7 @@ foreach ($t in $targets) {
 
   Write-Host ""
   Write-Host ("Platform: {0}" -f [string]$t.PlatformFolder) -ForegroundColor Green
-  Write-Host ("gamelist.xml: {0}" -f [string]$t.GamelistPath) -ForegroundColor Gray
+  Write-Host ("gamelist.xml: {0}" -f [string]$t.GamelistPath) -ForegroundColor DarkYellow
 
   $gamelistPath = [string]$t.GamelistPath
 
@@ -500,7 +499,7 @@ foreach ($t in $targets) {
 
   if ($null -eq $gameNodes -or $gameNodes.Count -eq 0) {
     Write-Host "No <game> nodes found (skipping)." -ForegroundColor Yellow
-    Write-Host ("Summary: Found 0 hidden, bypassed 0, unhid 0, skipped 0") -ForegroundColor Gray
+    Write-Host ("Summary: Found 0 hidden, bypassed 0, unhid 0, skipped 0") -ForegroundColor DarkYellow
     Write-Host ("Finished platform: {0}" -f [string]$t.PlatformFolder) -ForegroundColor Cyan
     continue
   }
@@ -527,7 +526,7 @@ foreach ($t in $targets) {
 
   if ($platHiddenFound -eq 0) {
     Write-Host "No hidden entries found." -ForegroundColor Cyan
-    Write-Host ("Summary: Found 0 hidden, bypassed 0, unhid 0, skipped 0") -ForegroundColor Gray
+    Write-Host ("Summary: Found 0 hidden, bypassed 0, unhid 0, skipped 0") -ForegroundColor DarkYellow
     Write-Host ("Finished platform: {0}" -f [string]$t.PlatformFolder) -ForegroundColor Cyan
     continue
   }
@@ -569,13 +568,13 @@ foreach ($t in $targets) {
 
   # If everything hidden was bypassed, we won't prompt.
   if ($promptList.Count -eq 0) {
-    Write-Host "All hidden entries were bypassed as Disk 2+ members of multi-disk sets." -ForegroundColor Gray
+    Write-Host "All hidden entries were bypassed as Disk 2+ members of multi-disk sets." -ForegroundColor DarkYellow
 
     $bypassText = Format-BypassBreakdown -BypassCounts $bypassCounts
     if (-not [string]::IsNullOrWhiteSpace($bypassText)) {
-      Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid 0, skipped 0, bypassed ({2})" -f $platHiddenFound, $platBypassed, $bypassText) -ForegroundColor Gray
+      Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid 0, skipped 0, bypassed ({2})" -f $platHiddenFound, $platBypassed, $bypassText) -ForegroundColor DarkYellow
     } else {
-      Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid 0, skipped 0" -f $platHiddenFound, $platBypassed) -ForegroundColor Gray
+      Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid 0, skipped 0" -f $platHiddenFound, $platBypassed) -ForegroundColor DarkYellow
     }
 
     Write-Host ("Finished platform: {0}" -f [string]$t.PlatformFolder) -ForegroundColor Cyan
@@ -640,9 +639,9 @@ foreach ($t in $targets) {
 
       $bypassText = Format-BypassBreakdown -BypassCounts $bypassCounts
       if (-not [string]::IsNullOrWhiteSpace($bypassText)) {
-        Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid {2}, skipped {3}, bypassed ({4})" -f $platHiddenFound, $platBypassed, $platUnhidden, $platSkipped, $bypassText) -ForegroundColor Gray
+        Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid {2}, skipped {3}, bypassed ({4})" -f $platHiddenFound, $platBypassed, $platUnhidden, $platSkipped, $bypassText) -ForegroundColor DarkYellow
       } else {
-        Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid {2}, skipped {3}" -f $platHiddenFound, $platBypassed, $platUnhidden, $platSkipped) -ForegroundColor Gray
+        Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid {2}, skipped {3}" -f $platHiddenFound, $platBypassed, $platUnhidden, $platSkipped) -ForegroundColor DarkYellow
       }
 
       Write-Host ("Finished platform: {0}" -f [string]$t.PlatformFolder) -ForegroundColor Cyan
@@ -688,15 +687,15 @@ foreach ($t in $targets) {
       Write-Host "Failed to save updated gamelist.xml (no changes written)." -ForegroundColor Red
     }
   } else {
-    Write-Host "No changes selected for this platform." -ForegroundColor Gray
+    Write-Host "No changes selected for this platform." -ForegroundColor DarkYellow
   }
 
   # Per-platform mini-summary + finished line
   $bypassText = Format-BypassBreakdown -BypassCounts $bypassCounts
   if (-not [string]::IsNullOrWhiteSpace($bypassText)) {
-    Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid {2}, skipped {3}, bypassed ({4})" -f $platHiddenFound, $platBypassed, $platUnhidden, $platSkipped, $bypassText) -ForegroundColor Gray
+    Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid {2}, skipped {3}, bypassed ({4})" -f $platHiddenFound, $platBypassed, $platUnhidden, $platSkipped, $bypassText) -ForegroundColor DarkYellow
   } else {
-    Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid {2}, skipped {3}" -f $platHiddenFound, $platBypassed, $platUnhidden, $platSkipped) -ForegroundColor Gray
+    Write-Host ("Summary: Found {0} hidden, bypassed {1}, unhid {2}, skipped {3}" -f $platHiddenFound, $platBypassed, $platUnhidden, $platSkipped) -ForegroundColor DarkYellow
   }
 
   Write-Host ("Finished platform: {0}" -f [string]$t.PlatformFolder) -ForegroundColor Cyan
