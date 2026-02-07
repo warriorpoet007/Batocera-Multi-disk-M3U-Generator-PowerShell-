@@ -1,6 +1,6 @@
 <#
 PURPOSE: Review and optionally unhide single-disk hidden entries in Batocera gamelist.xml files
-VERSION: 1.0
+VERSION: 1.1
 AUTHOR: Devin Kelley, Distant Thunderworks LLC
 
 NOTES:
@@ -18,6 +18,7 @@ BREAKDOWN:
     - This is done via stable grouping logic consistent with the Export Game List methodology:
         - GroupKey primary: <name> when present
         - GroupKey fallback: <path> when <name> is missing/blank
+        - Treats any <name> containing 'ZZZ(notgame):' as non-groupable so each is treated as a single-disk ROM
 
 - Within each group, a single "primary candidate" is chosen (Disk 1 / representative).
   Only that primary candidate is eligible for prompting if it is hidden.
@@ -312,6 +313,9 @@ function Get-GroupKey {
   )
 
   $n = [string]$NameRaw
+
+  # ZZZ(notgame) entries should be treated as single-disk (never grouped)
+  if (-not [string]::IsNullOrWhiteSpace($n) -and $n -match '(?i)ZZZ\(notgame\):') { return [string]$PathRaw }
   if (-not [string]::IsNullOrWhiteSpace($n)) { return $n.Trim() }
 
   return [string]$PathRaw
